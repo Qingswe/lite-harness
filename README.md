@@ -46,7 +46,8 @@
 OpenSpec 安装示例：
 
 ```bash
-npm install -g @fission-ai/openspec
+npm install -g @fission-ai/openspec@latest
+openspec init
 ```
 
 ## 工作循环
