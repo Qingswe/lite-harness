@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$ROOT_DIR"
+
+usage() {
+  cat <<'USAGE'
+用法:
+  .harness/scripts/harness verify <change>
+  .harness/scripts/harness close <change>
+
+说明:
+  verify 负责 OpenSpec 严格校验、变更级质量文件检查和基础环境探针。
+  close 在 verify 通过后检查 tasks、human checks，再执行 openspec archive。
+USAGE
+}
+
+fail() {
+  echo "错误: $*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "缺少命令: $1"
+}
+
+change_dir() {
+  local change="$1"
+  echo "openspec/changes/$change"
+}
+
+require_change_files() {
+  local change="$1"
+  local dir
+  dir="$(change_dir "$change")"
+
+  [ -d "$dir" ] || fail "找不到变更目录: $dir"
+  [ -f "$dir/tasks.md" ] || fail "缺少 $dir/tasks.md"
+  [ -f "$dir/quality-contract.md" ] || fail "缺少 $dir/quality-contract.md，请从 .harness/templates/quality-contract.md 复制"
+  [ -f "$dir/verification.md" ] || fail "缺少 $dir/verification.md，请从 .harness/templates/verification.md 复制"
+  [ -f "$dir/human-checks.md" ] || fail "缺少 $dir/human-checks.md，请从 .harness/templates/human-checks.md 复制"
+}
+
+check_tasks_complete() {
+  local change="$1"
+  local tasks_file
+  tasks_file="$(change_dir "$change")/tasks.md"
+
+  if grep -Eq '^[[:space:]]*-[[:space:]]*\[[[:space:]]\]' "$tasks_file"; then
+    fail "$tasks_file 仍有未完成任务"
+  fi
+}
+
+check_human_checks_clear() {
+  local change="$1"
+  local checks_file
+  checks_file="$(change_dir "$change")/human-checks.md"
+
+  if grep -Eiq '^[[:space:]]*\|[[:space:]]*(pending|failed)[[:space:]]*\|' "$checks_file"; then
+    fail "$checks_file 仍有 pending 或 failed 的人工检查表格行"
+  fi
+}
+
+check_quality_docs_decision() {
+  local change="$1"
+  local verification_file
+  verification_file="$(change_dir "$change")/verification.md"
+
+  if ! grep -Eq '^##[[:space:]]+质量文档判断[[:space:]]*$' "$verification_file"; then
+    fail "$verification_file 缺少“质量文档判断”章节；请按 docs/quality/README.md 判断是否需要更新 scorecard、tech-debt、risks 或 knowledge 文档"
+  fi
+}
+
+verify_change() {
+  local change="$1"
+
+  require_command openspec
+  require_change_files "$change"
+
+  echo "==> OpenSpec 严格校验: $change"
+  openspec validate "$change" --strict
+
+  echo "==> 基础环境探针"
+  if [ -x "./init.sh" ]; then
+    ./init.sh
+  else
+    bash ./init.sh
+  fi
+
+  echo "==> verify 完成: $change"
+}
+
+close_change() {
+  local change="$1"
+
+  verify_change "$change"
+  check_tasks_complete "$change"
+  check_human_checks_clear "$change"
+  check_quality_docs_decision "$change"
+
+  echo "==> 归档变更: $change"
+  openspec archive "$change"
+
+  echo "==> close 完成: $change"
+}
+
+command_name="${1:-}"
+change="${2:-}"
+
+if [ -z "$command_name" ] || [ -z "$change" ]; then
+  usage
+  exit 2
+fi
+
+case "$command_name" in
+  verify)
+    verify_change "$change"
+    ;;
+  close)
+    close_change "$change"
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    usage
+    fail "未知命令: $command_name"
+    ;;
+esac
