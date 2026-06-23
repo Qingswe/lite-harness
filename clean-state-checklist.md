@@ -2,7 +2,7 @@
 
 - [ ] 标准启动路径仍然可用
 - [ ] 标准验证路径仍然可运行
-- [ ] `.harness/current.json` 已记录唯一执行中 change、候选 change、当前 task、blocker 和 next action
+- [ ] `.harness/current.json` 已记录唯一 active change、候选 change、当前 task、blocker 和 next action
 - [ ] 候选 change 没有修改实现代码、当前产品事实或最终验证结论
 - [ ] 需要交接时已生成 `.harness/checkpoints/<change>/<timestamp>.md`
 - [ ] `.harness/feature-index.json` 只作为能力索引，没有复制任务和证据

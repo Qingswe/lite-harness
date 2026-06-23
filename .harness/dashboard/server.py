@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # 仓库根默认 = 本脚本所在 .harness/dashboard 的上两级目录，可用 --root 覆盖。
@@ -180,6 +181,70 @@ def load_current():
         return {"_parse_error": str(exc)}
 
 
+def save_current(current):
+    text, newline = read_text(CURRENT_JSON) if os.path.isfile(CURRENT_JSON) else ("", "\n")
+    _ = text  # 仅保留换行风格；JSON 统一格式化，避免手写状态漂移。
+    current["last_updated"] = date.today().isoformat()
+    data = json.dumps(current, ensure_ascii=False, indent=2)
+    write_lines(CURRENT_JSON, split_lines(data), newline)
+
+
+def require_change_exists(change_id):
+    if not change_id or "/" in change_id or "\\" in change_id or change_id in (".", ".."):
+        raise ValueError("非法 change id")
+    change_dir = os.path.normpath(os.path.join(CHANGES_DIR, change_id))
+    if os.path.commonpath([change_dir, CHANGES_DIR]) != os.path.normpath(CHANGES_DIR):
+        raise ValueError("路径越界")
+    if not os.path.isdir(change_dir):
+        raise FileNotFoundError(change_dir)
+
+
+def reset_execution_context(current, next_action):
+    current["current_task"] = None
+    current["working_files"] = []
+    current["blockers"] = []
+    current["dirty_assumptions"] = []
+    current["last_checkpoint"] = None
+    current["next_action"] = next_action
+
+
+def update_current_state(action, change_id=None):
+    current = load_current()
+    if current.get("_parse_error"):
+        raise ValueError("current.json 解析失败: %s" % current["_parse_error"])
+    candidates = set(current.get("candidate_changes") or [])
+    previous_active = current.get("active_change")
+
+    if action == "set-active":
+        require_change_exists(change_id)
+        current["active_change"] = change_id
+        candidates.discard(change_id)
+        if previous_active != change_id:
+            reset_execution_context(
+                current,
+                "继续执行 %s；读取 proposal.md、tasks.md、quality-contract.md 后推进 tasks。" % change_id)
+    elif action == "clear-active":
+        current["active_change"] = None
+        reset_execution_context(
+            current,
+            ("%s 已退出执行槽；人工检查完成后，可按人工指令运行 harness close。请选择下一个 active change。"
+             % previous_active) if previous_active else "无 active change；可在 dashboard 选择一个 change 设为 active。")
+    elif action == "add-candidate":
+        require_change_exists(change_id)
+        if change_id == previous_active:
+            raise ValueError("active change 不需要候选标记")
+        candidates.add(change_id)
+    elif action == "remove-candidate":
+        require_change_exists(change_id)
+        candidates.discard(change_id)
+    else:
+        raise ValueError("未知 current 操作: %s" % action)
+
+    current["candidate_changes"] = sorted(candidates)
+    save_current(current)
+    return current
+
+
 def list_checkpoints(change_id):
     """返回该 change 的检查点相对路径列表，按文件名倒序（最新在前）。"""
     d = os.path.join(CHECKPOINTS_DIR, change_id)
@@ -304,10 +369,34 @@ def build_state():
             c = build_change(name)
             c["is_active"] = name == active
             c["is_candidate"] = name in candidates
+            pending_or_failed = (c["check_counts"].get("pending", 0) +
+                                 c["check_counts"].get("failed", 0))
+            tasks_done = (c["task_progress"]["total"] > 0 and
+                          c["task_progress"]["done"] == c["task_progress"]["total"])
+            if c["is_active"]:
+                c["status"] = "active"
+            elif c["is_candidate"]:
+                c["status"] = "candidate"
+            elif tasks_done and c["has_checks"] and pending_or_failed:
+                c["status"] = "awaiting_human"
+            elif tasks_done and c["has_checks"]:
+                c["status"] = "ready_to_close"
+            elif tasks_done:
+                c["status"] = "complete"
+            else:
+                c["status"] = "planned"
             changes.append(c)
 
     def sort_key(c):
-        return (0 if c["is_active"] else (1 if c["is_candidate"] else 2), c["id"])
+        rank = {
+            "active": 0,
+            "awaiting_human": 1,
+            "ready_to_close": 2,
+            "candidate": 3,
+            "complete": 4,
+            "planned": 5,
+        }.get(c["status"], 9)
+        return (rank, c["id"])
     changes.sort(key=sort_key)
 
     return {
@@ -488,6 +577,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "conflict", "current": line}, 409)
                     return
                 self._send_json({"ok": True, "line": line})
+                return
+            if self.path == "/api/current":
+                current = update_current_state(payload["action"], payload.get("change"))
+                self._send_json({"ok": True, "current": current})
                 return
             self._send_json({"error": "not found"}, 404)
         except (KeyError, ValueError, IndexError) as exc:

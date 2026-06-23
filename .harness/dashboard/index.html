@@ -62,6 +62,8 @@
   .nav-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--gray); }
   .nav-dot.active { background: var(--accent); }
   .nav-dot.cand { background: var(--yellow); }
+  .nav-dot.await { background: var(--yellow); }
+  .nav-dot.ready { background: var(--green); }
   .nav-dot.done { background: var(--green); }
   .sb-foot { padding: 8px 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
 
@@ -94,8 +96,11 @@
   }
   .pill.active { background: rgba(79,140,255,.18); color: var(--accent); border: 1px solid rgba(79,140,255,.4); }
   .pill.cand   { background: rgba(110,118,129,.18); color: var(--muted); border: 1px solid var(--border); }
+  .pill.await  { background: rgba(210,153,34,.15); color: var(--yellow); border: 1px solid rgba(210,153,34,.4); }
+  .pill.ready  { background: rgba(63,185,80,.14); color: var(--green); border: 1px solid rgba(63,185,80,.35); }
   .pill.none   { color: var(--muted); }
   .pill.arch   { background: rgba(63,185,80,.14); color: var(--green); border: 1px solid rgba(63,185,80,.35); }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin: 8px 0 16px; }
 
   details.fold { border-top: 1px dashed var(--border); margin-top: 6px; }
   details.fold > summary { cursor: pointer; color: var(--muted); padding: 6px 0; font-size: 12px; user-select: none; }
@@ -299,8 +304,11 @@ function renderNav() {
     ]));
     STATE.changes.forEach(ch => {
       const p = ch.task_progress || { done: 0, total: 0 };
-      const dotCls = ch.is_active ? "active" : (ch.is_candidate ? "cand"
-        : (p.total && p.done === p.total ? "done" : ""));
+      const dotCls = ch.status === "active" ? "active"
+        : (ch.status === "candidate" ? "cand"
+        : (ch.status === "awaiting_human" ? "await"
+        : (ch.status === "ready_to_close" ? "ready"
+        : (p.total && p.done === p.total ? "done" : ""))));
       nav.appendChild(navItem({
         dot: dotCls,
         title: ch.title,
@@ -369,7 +377,9 @@ function renderOverview(box) {
   const b = el("div", { class: "banner" });
   b.appendChild(row("执行中", [ c.active_change
     ? el("span", { class: "pill active", text: c.active_change })
-    : el("span", { class: "pill none", text: "无执行中 change" }) ]));
+    : el("span", { class: "pill none", text: "无 active change" }) ]));
+  if (c.active_change)
+    b.appendChild(row("操作", [currentButton("取消 active", "clear-active", null)]));
   if (c.current_task) b.appendChild(row("当前任务", [el("span", { class:"cid", text: c.current_task })]));
   if (c.last_verified_task) b.appendChild(row("上次验证", [el("span", { class:"cid", text: c.last_verified_task })]));
   if (c.blockers && c.blockers.length)
@@ -418,12 +428,23 @@ function fold(summaryText, contentEl, onOpen) {
   if (onOpen) d.addEventListener("toggle", () => { if (d.open) onOpen(); }, { once: true });
   return d;
 }
+function currentButton(text, action, change) {
+  return el("button", { class: "btn", text, onclick: async () => {
+    const { res, data } = await api("/api/current", { action, change });
+    if (!res.ok) { toast("操作失败: " + (data.error || res.status), "err"); return; }
+    toast("已更新 current.json", "ok");
+    await load();
+  }});
+}
 
 // ---------- change 详情 ----------
 function renderChangeDetail(box, ch) {
   const titleKids = [el("span", { text: ch.title })];
   if (ch.is_active) titleKids.push(el("span", { class: "pill active", text: "执行中" }));
   else if (ch.is_candidate) titleKids.push(el("span", { class: "pill cand", text: "候选" }));
+  else if (ch.status === "awaiting_human") titleKids.push(el("span", { class: "pill await", text: "待人工检查" }));
+  else if (ch.status === "ready_to_close") titleKids.push(el("span", { class: "pill ready", text: "可归档" }));
+  else if (ch.status === "complete") titleKids.push(el("span", { class: "pill ready", text: "任务完成" }));
   box.appendChild(el("h1", { class: "page-title" }, titleKids));
   box.appendChild(el("div", { class: "page-sub", text: ch.id }));
 
@@ -433,6 +454,7 @@ function renderChangeDetail(box, ch) {
   const num = el("span", { class: "num", text: p.done + "/" + p.total });
   box.appendChild(el("div", { class: "progress", style: "margin-bottom:8px" },
     [ el("div", { class: "bar" }, [bar]), num ]));
+  box.appendChild(renderChangeActions(ch));
 
   const body = el("div", { class: "panel" + (ch.is_active ? " active" : "") });
 
@@ -470,6 +492,18 @@ function renderChangeDetail(box, ch) {
   }
 
   box.appendChild(body);
+}
+function renderChangeActions(ch) {
+  const actions = [];
+  if (ch.is_active) {
+    actions.push(currentButton("取消 active", "clear-active", null));
+  } else {
+    actions.push(currentButton("设为 active", "set-active", ch.id));
+    actions.push(ch.is_candidate
+      ? currentButton("移出候选", "remove-candidate", ch.id)
+      : currentButton("加入候选", "add-candidate", ch.id));
+  }
+  return el("div", { class: "actions" }, actions);
 }
 function renderTasks(ch, bar, num) {
   const ul = el("ul", { class: "tasks" });

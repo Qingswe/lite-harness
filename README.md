@@ -29,8 +29,8 @@
 | 项目原则 | `AGENTS.md` / `CLAUDE.md` |
 | 当前产品事实 | `openspec/specs/` |
 | 变更设计 | `openspec/changes/<id>/`（proposal、design、spec 增量、tasks） |
-| 执行状态 | `.harness/current.json`（唯一执行槽） |
-| 验证证据 | 执行中 change 的 `verification.md`、`human-checks.md`、`.harness/evidence/` |
+| 执行状态 | `.harness/current.json`（唯一 active 执行槽、候选 change 与恢复点） |
+| 验证证据 | 对应 change 的 `verification.md`、`human-checks.md`、`.harness/evidence/` |
 | 知识归档 | `openspec/archive/`、`docs/adr/`、`docs/knowledge/` |
 
 **OpenSpec** 负责定义 WHAT（产品行为、变更提案、任务清单、归档事实）；**Harness** 负责管理 HOW（恢复点、checkpoint、质量契约、验证证据、人工检查、收尾命令）。
@@ -56,19 +56,20 @@ openspec init
 
 1. 确认当前工作目录为项目根目录。
 2. 读取 `.harness/current.json`，确认 `active_change`、候选 change、当前 task、blocker 与 next action。
-3. 运行 `openspec list` 查看变更列表；读取执行中 change 的 `proposal.md`、`tasks.md`、`quality-contract.md`。
+3. 运行 `openspec list` 查看变更列表；读取 active change 的 `proposal.md`、`tasks.md`、`quality-contract.md`。
 4. 查阅 `git log --oneline -5` 了解近期提交。
 5. 读取相关 `ARCHITECTURE.md`、`docs/architecture/` 与 `docs/quality/scorecard.md`。
 6. 运行 `init.ps1`（Windows）或 `init.sh`（Unix / macOS / Linux）执行环境探针。
 
-随后仅围绕当前执行中 change 逐条推进 `tasks.md`，直至全部验证通过（可归档）或被明确记录为 blocked。
+随后仅围绕当前 active change 逐条推进 `tasks.md`，直至实现和自动验证完成、释放 active 执行槽，或被明确记录为 blocked。
 
 ### 执行规则
 
 - `openspec/changes/` 下可并存多个候选 change，但候选阶段仅做调研、proposal、design、spec 草案与 tasks 规划。
-- 同一时间仅允许一个执行中 change：`.harness/current.json` 中的 `active_change` 为唯一执行槽；仅该 change 可修改代码、更新 `openspec/specs/`、写入验证证据或执行 close。
+- 同一时间仅允许一个 active 执行 change：`.harness/current.json` 中的 `active_change` 为唯一执行槽；仅该 change 可进行实现、更新 `openspec/specs/`、写入本轮自动验证证据。
+- 实现和自动验证已完成但仍等待人工检查的 change，可以从 active 执行槽释放出来，待人工在 dashboard 中处理 `human-checks.md` 后再按明确指令 close。
 - 无运行证据时不得标记任务完成；不得通过修改 `tasks.md` 勾选状态或削弱测试来掩盖未完成工作。
-- 变更归档须通过 `.harness/scripts/harness close <id>` 执行，不得直接调用 `openspec archive`。
+- 变更归档须由人工明确指定 change，并通过 `.harness/scripts/harness close <id>` 执行，不得直接调用 `openspec archive`。
 
 完整规则见 [AGENTS.md](AGENTS.md) 与 [CLAUDE.md](CLAUDE.md)。
 
@@ -84,7 +85,7 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 
 ## 看板（Dashboard）
 
-本地网页工具，用于集中查看与勾选各 change 的任务项及人工检查项，并只读预览 checkpoint、验证记录、证据与质量文档：
+本地网页工具，用于集中查看与勾选各 change 的任务项及人工检查项，手动设置 / 释放 active change，管理候选 change，并只读预览 checkpoint、验证记录、证据与质量文档：
 
 ```powershell
 .\board.cmd            # Windows，默认端口 8777
@@ -107,7 +108,7 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 ├── board.cmd / board.sh       # 看板快捷启动
 ├── openspec/                  # 规格、变更设计与归档（由 OpenSpec 管理）
 ├── .harness/
-│   ├── current.json           # 当前恢复点（唯一执行槽）
+│   ├── current.json           # 当前恢复点（唯一 active 执行槽）
 │   ├── feature-index.json     # 能力索引（非任务管理器）
 │   ├── templates/             # quality-contract / verification / human-checks / checkpoint
 │   ├── checkpoints/           # 会话交接快照
@@ -129,7 +130,7 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 - 质量契约要求的自动验证均已执行，证据已写入 `verification.md` 与 `.harness/evidence/`。
 - `human-checks.md` 中须人工确认的项目状态为 `passed` 或已明确 `waived`。
 - `verification.md` 已记录质量文档判断，且相关长期质量或知识文档已同步更新。
-- `.harness/current.json` 与 checkpoint 已更新至最新状态。
+- `.harness/current.json` 与 checkpoint 已更新至最新状态；若仍待人工检查，应已释放 active 执行槽并记录后续 close 条件。
 
 ## 许可证
 

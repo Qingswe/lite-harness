@@ -11,23 +11,21 @@ $RootDir = Resolve-Path $PSScriptRoot
 Set-Location $RootDir
 
 function Show-Usage {
-    Write-Output @"
-用法:
-  .\init.ps1
-
-说明:
-  init.ps1 是 Windows 的环境探针入口。
-  Unix/macOS/Linux 请使用 ./init.sh。
-  验证与归档请使用 .\.harness\scripts\harness.ps1 verify|close <change>。
-
-可选环境变量:
-  UNITY_BIN=<path>          指定 Unity 可执行文件
-  REQUIRE_UNITY_PROJECT=1   当前目录不是 Unity 项目时失败
-  RUN_UNITY_IMPORT=1        执行 Unity 导入/编译
-  RUN_EDITMODE=1            执行 EditMode 测试
-  RUN_PLAYMODE=1            执行 PlayMode 测试
-  RUN_START_COMMAND=1       打开 Unity 编辑器
-"@
+    Write-Output "Usage:"
+    Write-Output "  .\init.ps1"
+    Write-Output ""
+    Write-Output "Description:"
+    Write-Output "  init.ps1 is the Windows environment probe entry."
+    Write-Output "  Use ./init.sh on Unix/macOS/Linux."
+    Write-Output "  Use .\.harness\scripts\harness.ps1 verify|close <change> for verification and archive."
+    Write-Output ""
+    Write-Output "Optional environment variables:"
+    Write-Output "  UNITY_BIN=<path>          Override Unity executable"
+    Write-Output "  REQUIRE_UNITY_PROJECT=1   Fail when current directory is not a Unity project"
+    Write-Output "  RUN_UNITY_IMPORT=1        Run Unity import/compile"
+    Write-Output "  RUN_EDITMODE=1            Run EditMode tests"
+    Write-Output "  RUN_PLAYMODE=1            Run PlayMode tests"
+    Write-Output "  RUN_START_COMMAND=1       Open Unity editor"
 }
 
 function Test-UnityProject {
@@ -70,7 +68,7 @@ function Invoke-Unity([string]$UnityBin, [string[]]$Arguments) {
     Write-Output "==> Unity: $UnityBin $($Arguments -join ' ')"
     & $UnityBin @Arguments
     if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-        throw "错误: Unity 命令失败，退出码 $LASTEXITCODE"
+        throw "Error: Unity command failed with exit code $LASTEXITCODE"
     }
 }
 
@@ -79,40 +77,40 @@ if ($Command -in @("help", "--help", "-h")) {
     return
 }
 
-Write-Output "==> 当前目录: $PWD"
+Write-Output "==> Current directory: $PWD"
 
 if (Get-Command "openspec" -ErrorAction SilentlyContinue) {
-    Write-Output "==> OpenSpec 活跃变更"
+    Write-Output "==> OpenSpec active changes"
     openspec list
 }
 else {
-    Write-Output "==> 未找到 openspec；跳过 OpenSpec 探针"
+    Write-Output "==> openspec not found; skipping OpenSpec probe"
 }
 
 if (-not (Test-UnityProject)) {
-    $Message = "当前目录不是完整 Unity 项目；缺少 Assets、Packages\manifest.json 或 ProjectSettings。"
+    $Message = "Current directory is not a complete Unity project; Assets, Packages\manifest.json, or ProjectSettings is missing."
     if (Test-EnvFlag "REQUIRE_UNITY_PROJECT") {
-        throw "错误: $Message"
+        throw "Error: $Message"
     }
 
     Write-Output "==> $Message"
-    Write-Output "==> 按模板/文档仓库处理，跳过 Unity 导入和测试。"
+    Write-Output "==> Treating this as a template/docs repository; skipping Unity import and tests."
     return
 }
 
 $UnityBin = Resolve-UnityBin
 if ([string]::IsNullOrWhiteSpace($UnityBin)) {
-    $Message = "未找到 Unity 可执行文件；可通过 UNITY_BIN 指定。"
+    $Message = "Unity executable not found; set UNITY_BIN to override."
     if ((Test-EnvFlag "RUN_UNITY_IMPORT") -or (Test-EnvFlag "RUN_EDITMODE") -or (Test-EnvFlag "RUN_PLAYMODE") -or (Test-EnvFlag "RUN_START_COMMAND")) {
-        throw "错误: $Message"
+        throw "Error: $Message"
     }
 
     Write-Output "==> $Message"
-    Write-Output "==> 未请求 Unity 动作，环境探针完成。"
+    Write-Output "==> No Unity action requested; environment probe complete."
     return
 }
 
-Write-Output "==> 使用编辑器: $UnityBin"
+Write-Output "==> Unity editor: $UnityBin"
 
 if (Test-EnvFlag "RUN_UNITY_IMPORT") {
     Invoke-Unity $UnityBin @("-batchmode", "-quit", "-nographics", "-projectPath", $RootDir, "-logFile", "-")
@@ -126,15 +124,15 @@ if (Test-EnvFlag "RUN_PLAYMODE") {
     Invoke-Unity $UnityBin @("-batchmode", "-projectPath", $RootDir, "-runTests", "-testPlatform", "PlayMode", "-testResults", (Join-Path $RootDir "test-results-playmode.xml"), "-logFile", "-")
 }
 
-Write-Output "==> Unity 启动命令:"
+Write-Output "==> Unity start command:"
 Write-Output "    `"$UnityBin`" -projectPath `"$RootDir`""
 
 if (Test-EnvFlag "RUN_START_COMMAND") {
     & $UnityBin -projectPath $RootDir
     if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-        throw "错误: Unity 启动失败，退出码 $LASTEXITCODE"
+        throw "Error: Unity start failed with exit code $LASTEXITCODE"
     }
     return
 }
 
-Write-Output "==> 环境探针完成。需要实际验证时，请按质量契约设置 RUN_UNITY_IMPORT/RUN_EDITMODE/RUN_PLAYMODE。"
+Write-Output "==> Environment probe complete. Set RUN_UNITY_IMPORT/RUN_EDITMODE/RUN_PLAYMODE for real validation."

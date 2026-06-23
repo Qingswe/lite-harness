@@ -2,6 +2,6 @@
   "schema_version": 1,
   "project": "替换成你的 Unity 项目名",
   "last_updated": null,
-  "note": "能力索引，不是任务管理器或执行锁。产品行为以 openspec/specs/ 为准，候选和执行中 change 以 openspec/changes/<id>/ 为准，唯一执行槽以 .harness/current.json.active_change 为准，验证证据以 verification.md 和 .harness/evidence/ 为准。",
+  "note": "能力索引，不是任务管理器。产品行为以 openspec/specs/ 为准，候选和 active 执行 change 以 openspec/changes/<id>/ 为准，唯一 active 执行槽以 .harness/current.json.active_change 为准，验证证据以对应 change 的 verification.md 和 .harness/evidence/ 为准。",
   "features": []
 }

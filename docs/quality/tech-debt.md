@@ -9,6 +9,6 @@
 ## 状态说明
 
 - `open`：已确认但尚未处理。
-- `in_progress`：已有执行中 change 在处理。
+- `in_progress`：已有 active change 在处理。
 - `closed`：已解决并有证据。
 - `waived`：明确接受风险，不再追踪。

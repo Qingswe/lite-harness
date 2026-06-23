@@ -6,7 +6,7 @@
   "last_verified_task": null,
   "working_files": [],
   "blockers": [],
-  "next_action": "在项目根目录运行 openspec init 初始化 OpenSpec；可创建多个候选 change 做调研与规划，进入实现前将唯一 change 写入 active_change。",
+  "next_action": "在项目根目录运行 openspec init 初始化 OpenSpec；可创建多个候选 change 做调研与规划，进入实现前在 dashboard 或 current.json 中选定唯一 active_change。",
   "dirty_assumptions": [],
   "last_checkpoint": null,
   "last_updated": "2026-06-21"
