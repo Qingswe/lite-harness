@@ -14,10 +14,12 @@ function Show-Usage {
     Write-Output "Usage:"
     Write-Output "  .\.harness\scripts\harness.ps1 verify <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 close <change>"
+    Write-Output "  .\.harness\scripts\harness.ps1 reset-current"
     Write-Output ""
     Write-Output "Description:"
     Write-Output "  verify validates OpenSpec, required change files, and the baseline probe."
     Write-Output "  close checks tasks, human checks, quality docs decision, then runs openspec archive."
+    Write-Output "  reset-current clears .harness\current.json back to an empty execution slot."
 }
 
 function Fail([string]$Message) {
@@ -27,6 +29,13 @@ function Fail([string]$Message) {
 function Require-Command([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         Fail "Missing command: $Name"
+    }
+}
+
+function Require-ChangeArg([string]$CommandName, [string]$ChangeId) {
+    if ([string]::IsNullOrWhiteSpace($ChangeId)) {
+        Show-Usage
+        Fail "$CommandName requires <change>."
     }
 }
 
@@ -114,14 +123,45 @@ function Invoke-Close([string]$ChangeId) {
     Write-Output "==> close completed: $ChangeId"
 }
 
-if ([string]::IsNullOrWhiteSpace($Command) -or [string]::IsNullOrWhiteSpace($Change)) {
+function Reset-Current {
+    $CurrentFile = Join-Path $RootDir ".harness\current.json"
+    $Today = Get-Date -Format "yyyy-MM-dd"
+    $Content = @"
+{
+  "schema_version": 1,
+  "active_change": null,
+  "candidate_changes": [],
+  "current_task": null,
+  "last_verified_task": null,
+  "working_files": [],
+  "blockers": [],
+  "next_action": null,
+  "dirty_assumptions": [],
+  "last_checkpoint": null,
+  "last_updated": "$Today"
+}
+"@
+
+    $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($CurrentFile, $Content + [Environment]::NewLine, $Utf8NoBom)
+    Write-Output "==> Cleared .harness\current.json"
+}
+
+if ([string]::IsNullOrWhiteSpace($Command)) {
     Show-Usage
     exit 2
 }
 
 switch ($Command) {
-    "verify" { Invoke-Verify $Change }
-    "close" { Invoke-Close $Change }
+    "verify" {
+        Require-ChangeArg "verify" $Change
+        Invoke-Verify $Change
+    }
+    "close" {
+        Require-ChangeArg "close" $Change
+        Invoke-Close $Change
+    }
+    "reset-current" { Reset-Current }
     { $_ -in @("help", "--help", "-h") } { Show-Usage }
     default {
         Show-Usage

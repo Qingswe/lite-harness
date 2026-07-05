@@ -11,10 +11,12 @@ usage() {
 用法:
   .harness/scripts/harness verify <change>
   .harness/scripts/harness close <change>
+  .harness/scripts/harness reset-current
 
 说明:
   verify 负责 OpenSpec 严格校验、变更级质量文件检查和基础环境探针。
   close 在 verify 通过后检查 tasks、human checks，再执行 openspec archive。
+  reset-current 清空 .harness/current.json，只保留可恢复的空执行槽。
 USAGE
 }
 
@@ -107,20 +109,50 @@ close_change() {
   echo "==> close 完成: $change"
 }
 
+reset_current() {
+  local current_file=".harness/current.json"
+  local today
+  today="$(date +%F)"
+
+  mkdir -p "$(dirname "$current_file")"
+  cat > "$current_file" <<EOF
+{
+  "schema_version": 1,
+  "active_change": null,
+  "candidate_changes": [],
+  "current_task": null,
+  "last_verified_task": null,
+  "working_files": [],
+  "blockers": [],
+  "next_action": null,
+  "dirty_assumptions": [],
+  "last_checkpoint": null,
+  "last_updated": "$today"
+}
+EOF
+
+  echo "==> 已清空 $current_file"
+}
+
 command_name="${1:-}"
 change="${2:-}"
 
-if [ -z "$command_name" ] || [ -z "$change" ]; then
+if [ -z "$command_name" ]; then
   usage
   exit 2
 fi
 
 case "$command_name" in
   verify)
+    [ -n "$change" ] || { usage; fail "verify 需要 <change>"; }
     verify_change "$change"
     ;;
   close)
+    [ -n "$change" ] || { usage; fail "close 需要 <change>"; }
     close_change "$change"
+    ;;
+  reset-current)
+    reset_current
     ;;
   help|--help|-h)
     usage
