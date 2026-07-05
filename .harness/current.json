@@ -2,12 +2,26 @@
   "schema_version": 1,
   "active_change": null,
   "candidate_changes": [],
-  "current_task": null,
-  "last_verified_task": null,
-  "working_files": [],
-  "blockers": [],
-  "next_action": "在项目根目录运行 openspec init 初始化 OpenSpec；可创建多个候选 change 做调研与规划，进入实现前在 dashboard 或 current.json 中选定唯一 active_change。",
-  "dirty_assumptions": [],
+  "current_task": "added harness updater scripts for syncing template-owned files from GitHub",
+  "last_verified_task": "bash syntax, diff whitespace, ./init.sh probe, and local temporary Git-source update apply simulation passed; PowerShell runtime was unavailable on this machine",
+  "working_files": [
+    ".harness/update-manifest.txt",
+    ".harness/scripts/update-harness",
+    ".harness/scripts/update-harness.ps1",
+    "update-harness.cmd",
+    "README.md",
+    ".harness/dashboard/serve.sh",
+    ".harness/scripts/harness",
+    "board.sh",
+    "init.sh"
+  ],
+  "blockers": [
+    "openspec/changes is not initialized in this template repository, so no active OpenSpec change evidence was created for this narrow tooling update."
+  ],
+  "next_action": "Review and commit the harness updater changes; after pushing to GitHub, projects using this harness can run the updater against the default main branch.",
+  "dirty_assumptions": [
+    "Default updater scope should avoid project-owned files such as AGENTS.md, CLAUDE.md, ARCHITECTURE.md, README.md, .harness/current.json, .harness/feature-index.json, openspec/, and long-lived quality records."
+  ],
   "last_checkpoint": null,
-  "last_updated": "2026-06-21"
+  "last_updated": "2026-07-05"
 }

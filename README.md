@@ -83,6 +83,24 @@ openspec init
 
 Windows 环境可使用 `.harness/scripts/harness.ps1`。
 
+## 更新 Harness 模板
+
+已采用本仓库的项目，可以从 GitHub 拉取最新模板文件并同步到项目根目录：
+
+```bash
+.harness/scripts/update-harness          # Unix / macOS / Git Bash，默认只预览
+.harness/scripts/update-harness --apply  # 确认后实际同步
+```
+
+```powershell
+.\update-harness.cmd        # Windows，默认只预览
+.\update-harness.cmd -Apply # 确认后实际同步
+```
+
+更新器默认从 `https://github.com/Qingswe/lite-harness.git` 的 `main` 分支读取 `.harness/update-manifest.txt`，只同步 harness 管理的脚本、看板、模板和流程说明文件。它不会默认覆盖项目事实或执行状态文件，例如 `AGENTS.md`、`CLAUDE.md`、`ARCHITECTURE.md`、`README.md`、`.harness/current.json`、`.harness/feature-index.json`、`openspec/` 与长期质量记录。
+
+实际同步时会先把被覆盖的文件备份到 `.harness/backups/harness-update-<timestamp>/`。可通过 `--ref <tag-or-branch>` / `-Ref <tag-or-branch>` 固定更新来源。
+
 ## 看板（Dashboard）
 
 本地网页工具，用于集中查看与勾选各 change 的任务项及人工检查项，手动设置 / 释放 active change，管理候选 change，并只读预览 checkpoint、验证记录、证据与质量文档：

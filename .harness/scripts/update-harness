@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_TARGET="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DEFAULT_REPO_URL="https://github.com/Qingswe/lite-harness.git"
+DEFAULT_REF="main"
+DEFAULT_MANIFEST=".harness/update-manifest.txt"
+
+repo_url="$DEFAULT_REPO_URL"
+ref="$DEFAULT_REF"
+target_dir="$DEFAULT_TARGET"
+manifest_path="$DEFAULT_MANIFEST"
+apply=0
+backup=1
+backup_dir=""
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  .harness/scripts/update-harness [options]
+
+Options:
+  --apply                 Apply the update. Without this flag the command is a dry run.
+  --repo <url>            Source Git repository. Default: https://github.com/Qingswe/lite-harness.git
+  --ref <name>            Source branch, tag, or commit. Default: main
+  --target <dir>          Target project root. Default: current harness root
+  --manifest <path>       Manifest path inside the source repo. Default: .harness/update-manifest.txt
+  --backup-dir <dir>      Backup directory. Default: .harness/backups/harness-update-<timestamp>
+  --no-backup             Do not back up overwritten files.
+  -h, --help              Show help.
+
+Examples:
+  .harness/scripts/update-harness
+  .harness/scripts/update-harness --apply
+  .harness/scripts/update-harness --ref v0.3.0 --apply
+USAGE
+}
+
+fail() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --apply)
+      apply=1
+      shift
+      ;;
+    --repo)
+      repo_url="${2:-}"
+      [ -n "$repo_url" ] || fail "--repo requires a value"
+      shift 2
+      ;;
+    --ref)
+      ref="${2:-}"
+      [ -n "$ref" ] || fail "--ref requires a value"
+      shift 2
+      ;;
+    --target)
+      target_dir="${2:-}"
+      [ -n "$target_dir" ] || fail "--target requires a value"
+      shift 2
+      ;;
+    --manifest)
+      manifest_path="${2:-}"
+      [ -n "$manifest_path" ] || fail "--manifest requires a value"
+      shift 2
+      ;;
+    --backup-dir)
+      backup_dir="${2:-}"
+      [ -n "$backup_dir" ] || fail "--backup-dir requires a value"
+      shift 2
+      ;;
+    --no-backup)
+      backup=0
+      shift
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      fail "Unknown option: $1"
+      ;;
+  esac
+done
+
+require_command git
+
+target_dir="$(cd "$target_dir" && pwd)"
+timestamp="$(date +%Y%m%d-%H%M%S)"
+if [ -z "$backup_dir" ]; then
+  backup_dir="$target_dir/.harness/backups/harness-update-$timestamp"
+elif [ "${backup_dir#/}" = "$backup_dir" ]; then
+  backup_dir="$target_dir/$backup_dir"
+fi
+
+tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t lite-harness-update)"
+source_dir="$tmp_dir/source"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+echo "==> Source: $repo_url ($ref)"
+echo "==> Target: $target_dir"
+if [ "$apply" -eq 0 ]; then
+  echo "==> Mode: dry run. Re-run with --apply to copy files."
+else
+  echo "==> Mode: apply"
+  if [ "$backup" -eq 1 ]; then
+    echo "==> Backup: $backup_dir"
+  else
+    echo "==> Backup: disabled"
+  fi
+fi
+
+if ! git clone --quiet --depth 1 --branch "$ref" "$repo_url" "$source_dir" 2>/dev/null; then
+  git clone --quiet "$repo_url" "$source_dir"
+  git -C "$source_dir" checkout --quiet "$ref"
+fi
+
+manifest_file="$source_dir/$manifest_path"
+[ -f "$manifest_file" ] || fail "Missing manifest in source repo: $manifest_path"
+
+backup_existing_file() {
+  local rel="$1"
+  local dest="$target_dir/$rel"
+  local backup_path="$backup_dir/$rel"
+
+  [ "$backup" -eq 1 ] || return 0
+  [ -e "$dest" ] || return 0
+
+  mkdir -p "$(dirname "$backup_path")"
+  cp -p "$dest" "$backup_path"
+}
+
+copy_one_file() {
+  local rel="$1"
+  local src="$source_dir/$rel"
+  local dest="$target_dir/$rel"
+  local action
+
+  [ -f "$src" ] || fail "Manifest entry is not a file in source repo: $rel"
+
+  if [ -e "$dest" ]; then
+    action="update"
+  else
+    action="create"
+  fi
+
+  if [ "$apply" -eq 0 ]; then
+    echo "DRY-RUN $action $rel"
+    return 0
+  fi
+
+  backup_existing_file "$rel"
+  mkdir -p "$(dirname "$dest")"
+  cp -p "$src" "$dest"
+  echo "$action $rel"
+}
+
+sync_entry() {
+  local entry="$1"
+  local src="$source_dir/$entry"
+  local file
+  local rel
+
+  if [ -d "$src" ]; then
+    while IFS= read -r file; do
+      rel="${file#$source_dir/}"
+      copy_one_file "$rel"
+    done < <(find "$src" -type f | sort)
+  else
+    copy_one_file "$entry"
+  fi
+}
+
+while IFS= read -r raw_line || [ -n "$raw_line" ]; do
+  line="${raw_line%%#*}"
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+
+  [ -n "$line" ] || continue
+  case "$line" in
+    /*|*..*)
+      fail "Manifest entries must be relative paths without '..': $line"
+      ;;
+  esac
+
+  sync_entry "$line"
+done < "$manifest_file"
+
+echo "==> Harness update finished."

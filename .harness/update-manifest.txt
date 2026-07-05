@@ -1,0 +1,26 @@
+# lite-harness update manifest
+#
+# Paths listed here are owned by the harness template updater.
+# Project state files such as .harness/current.json, .harness/feature-index.json,
+# openspec/, ARCHITECTURE.md, AGENTS.md, CLAUDE.md, README.md, and long-lived
+# quality records are intentionally excluded by default.
+
+.harness/dashboard/
+.harness/scripts/
+.harness/templates/
+.harness/checkpoints/README.md
+.harness/evidence/README.md
+.harness/update-manifest.txt
+board.cmd
+board.sh
+update-harness.cmd
+init.ps1
+init.sh
+index.md
+clean-state-checklist.md
+docs/adr/README.md
+docs/architecture/README.md
+docs/knowledge/README.md
+docs/knowledge/changes/README.md
+docs/knowledge/pitfalls/README.md
+docs/quality/README.md
