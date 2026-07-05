@@ -15,6 +15,7 @@
 1. 安装 [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec)，并运行 `openspec init` 完成初始化。
 2. 按项目实际情况填写 `ARCHITECTURE.md`、`.harness/current.json` 与 `.harness/feature-index.json`。
 3. 参阅 [index.md](index.md) 了解变更创建、执行与归档的完整流程。
+4. 如需定期运行后台 Codex 任务，参阅 [docs/agents/README.md](docs/agents/README.md) 与 [docs/agents/background-codex-tasks.md](docs/agents/background-codex-tasks.md)。
 
 ## 核心理念
 
@@ -83,6 +84,16 @@ openspec init
 
 Windows 环境可使用 `.harness/scripts/harness.ps1`。
 
+## 后台 Codex 任务
+
+模板提供一组可直接复制给 Codex 的后台任务 Prompt，用于定期扫描架构漂移、agent 残留、质量文档过期和 Unity 资源完整性风险：
+
+- [docs/agents/README.md](docs/agents/README.md)：任务体系、推荐接入顺序和运行原则。
+- [docs/agents/background-codex-tasks.md](docs/agents/background-codex-tasks.md)：如何把 Prompt 实装为每日、每周或发布前任务。
+- [docs/agents/prompts/](docs/agents/prompts/)：Harness Health Check、Quality Docs GC、Architecture Drift Scan、Agent Residue Scan、Refactor PR Candidate 和 Unity Asset Integrity 的可复制 Prompt。
+
+这些任务默认先产出报告和证据；只有低风险、范围清晰、验证路径明确的问题才建议自动创建小型 draft PR。
+
 ## 更新 Harness 模板
 
 已采用本仓库的项目，可以从 GitHub 拉取最新模板文件并同步到项目根目录：
@@ -135,6 +146,7 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 │   └── dashboard/             # 本地看板
 └── docs/
     ├── architecture/  adr/    # 架构说明与架构决策记录
+    ├── agents/                # 后台 Codex 任务和 Prompt
     ├── quality/               # 质量文档更新规则、scorecard、tech-debt、risks
     └── knowledge/             # 知识归档与踩坑记录
 ```

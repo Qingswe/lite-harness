@@ -41,6 +41,7 @@
 └── docs/
     ├── architecture/
     ├── adr/
+    ├── agents/
     ├── quality/
     └── knowledge/
 ```
@@ -121,6 +122,12 @@ Harness 负责运行态和证据：当前恢复点、checkpoint、质量契约�
 
 - `.harness/scripts/harness verify <change>`：校验 OpenSpec、检查变更级质量文件，并运行平台环境探针。
 - `.harness/scripts/harness close <change>`：在 verify 通过、tasks 完成、human checks 无 pending/failed，且 `verification.md` 已记录“质量文档判断”后执行 `openspec archive <change>`；close 必须由人工明确指定 change，不要求该 change 仍占用 active 执行槽。
+
+## 后台 Codex 任务
+
+如果项目希望像垃圾回收一样持续偿还 agent 残留和架构漂移，使用 `docs/agents/` 中的后台任务 Prompt。应用方式见 `docs/agents/background-codex-tasks.md`。
+
+定时任务不得绕过 OpenSpec：如果发现的问题会改变产品行为、规格事实或质量契约，应先创建 candidate change，而不是直接让后台任务改代码。
 
 ## 收尾检查
 

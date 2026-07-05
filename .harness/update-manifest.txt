@@ -20,6 +20,7 @@ index.md
 clean-state-checklist.md
 docs/adr/README.md
 docs/architecture/README.md
+docs/agents/
 docs/knowledge/README.md
 docs/knowledge/changes/README.md
 docs/knowledge/pitfalls/README.md
