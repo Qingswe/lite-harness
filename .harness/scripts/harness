@@ -157,6 +157,11 @@ close_change() {
   echo "==> 收尾 current.json"
   finalize_close "$change"
 
+  # 归档会把 delta spec 落进 openspec/specs/，能力索引随之过期；不在这里同步，
+  # 下一次 verify 必然在 sync-feature-index --check 处失败。
+  echo "==> 同步能力索引"
+  "$(resolve_python)" .harness/scripts/sync-feature-index.py
+
   echo "==> close 完成: $change"
 }
 

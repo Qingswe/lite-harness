@@ -14,7 +14,7 @@ domain、maturity 和 last_verified_commit。
 import datetime
 import json
 import os
-import subprocess
+import re
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,32 +44,22 @@ def spec_ids_from_disk():
     )
 
 
-def requirement_counts():
-    """向 openspec 询问每个 spec 的 requirement 数；不可用时返回空映射。"""
+REQUIREMENT_RE = re.compile(r"(?m)^###\s+Requirement:")
+
+
+def requirement_count(spec_id):
+    """统计一个 spec 的 requirement 数。
+
+    直接解析 spec.md 而不是调用 `openspec list --specs --json`：索引必须能被
+    确定性重算，否则 `--check` 会因为 openspec CLI 是否可用而假报不同步。
+    两种口径已在 62 个 spec 上逐一比对一致。
+    """
+    path = os.path.join(SPECS_DIR, spec_id, "spec.md")
     try:
-        raw = subprocess.run(
-            ["openspec", "list", "--specs", "--json"],
-            cwd=ROOT_DIR,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return {}
-
-    if raw.returncode != 0:
-        return {}
-
-    try:
-        payload = json.loads(raw.stdout)
-    except ValueError:
-        return {}
-
-    return {
-        entry["id"]: entry.get("requirementCount")
-        for entry in payload.get("specs", [])
-        if isinstance(entry, dict) and "id" in entry
-    }
+        with open(path, encoding="utf-8") as handle:
+            return len(REQUIREMENT_RE.findall(handle.read()))
+    except OSError:
+        return None
 
 
 def active_changes_by_spec():
@@ -139,7 +129,6 @@ def load_overrides():
 
 def build_index():
     overrides = load_overrides()
-    counts = requirement_counts()
     in_flight = active_changes_by_spec()
 
     features = []
@@ -151,7 +140,7 @@ def build_index():
                 "title": override.get("title", spec_id),
                 "domain": override.get("domain", spec_id.split("-")[0]),
                 "spec_ref": "openspec/specs/%s/spec.md" % spec_id,
-                "requirement_count": counts.get(spec_id),
+                "requirement_count": requirement_count(spec_id),
                 "maturity": override.get("maturity", "implemented"),
                 "quality": override.get("quality"),
                 "active_changes": in_flight.get(spec_id, []),

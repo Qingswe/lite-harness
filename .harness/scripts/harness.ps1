@@ -202,6 +202,13 @@ function Invoke-Close([string]$ChangeId, [bool]$SkipSpecUpdates, [bool]$SkipProb
     Write-Output "==> Finalize current.json"
     Invoke-StateCommand @("finalize-close", $ChangeId)
 
+    # Archiving lands delta specs in openspec/specs/, which makes the capability
+    # index stale; without this the next verify fails on the sync check.
+    Write-Output "==> Sync capability index"
+    $Python = Resolve-Python
+    & $Python (Join-Path $PSScriptRoot "sync-feature-index.py")
+    if ($LASTEXITCODE -ne 0) { Fail "Failed to sync feature-index.json after archiving." }
+
     Write-Output "==> close completed: $ChangeId"
 }
 
