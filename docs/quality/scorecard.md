@@ -1,8 +1,12 @@
 # 质量评分卡
 
-这份文档只记录项目和领域的长期质量快照，不记录单次变更的完整验证日志。
+这份文档只记录项目和领域的长期质量**当前快照**，不记录单次变更的完整验证日志。
 
-单次变更的质量要求写在 `openspec/changes/<change>/quality-contract.md`，真实验证证据写在 `openspec/changes/<change>/verification.md`。
+- 单次变更的质量要求写在 `openspec/changes/<change>/quality-contract.md`，真实验证证据写在 `openspec/changes/<change>/verification.md`。
+- 每次评分变化的理由与详细证据写在 `docs/quality/scorecard-history.md`。
+- 单元格只写结论与指针，不写完整测试日志；写法约束见 `docs/quality/README.md`。
+
+会话中按当前 change 涉及的领域读取对应行即可，不需要整份读取。
 
 ## 评级标准
 
@@ -23,11 +27,6 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | - | - | - | - | - | - | - |
 
-## 更新记录
+## 历史
 
-### YYYY-MM-DD
-
-- 提升：
-- 下降：
-- 新发现的缺口：
-- 已关闭的缺口：
+每次评分变化的日期条目、理由与详细证据见 `docs/quality/scorecard-history.md`。

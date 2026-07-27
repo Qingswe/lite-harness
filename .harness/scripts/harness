@@ -9,14 +9,27 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'USAGE'
 用法:
-  .harness/scripts/harness verify <change>
-  .harness/scripts/harness close <change>
+  .harness/scripts/harness status [--json]
+  .harness/scripts/harness sync-candidates
+  .harness/scripts/harness verify <change> [--no-probe]
+  .harness/scripts/harness close <change> [--skip-specs] [--no-probe]
   .harness/scripts/harness reset-current
 
 说明:
-  verify 负责 OpenSpec 严格校验、变更级质量文件检查和基础环境探针。
+  status 一次输出会话恢复所需的执行状态：active 槽、候选 change 与 lifecycle
+         phase、blocker、next action、任务进度、证据数量、漂移告警和最近提交。
+  sync-candidates 按 openspec/changes/ 的实际内容重写候选集合；候选成员关系
+         不由人工维护，per-change context 原样保留。
+  verify 负责 OpenSpec 严格校验、变更级质量文件检查、仓库结构检查（文档引用
+         路径、skill 一致性、feature-index 同步），并按 quality-contract.md
+         的「必须验证」决定是否执行 Unity 环境探针。
   close 在 verify 通过后检查 tasks、human checks，再执行 openspec archive。
   reset-current 清空 .harness/current.json，只保留可恢复的空执行槽。
+
+选项:
+  --json        status 以 JSON 输出，供脚本消费。
+  --no-probe    人工覆盖：即使质量契约要求，也跳过 Unity 环境探针。
+  --skip-specs  归档时跳过 spec 更新，用于 infra、工具或纯文档变更。
 USAGE
 }
 
@@ -57,13 +70,9 @@ check_tasks_complete() {
 }
 
 check_human_checks_clear() {
-  local change="$1"
-  local checks_file
-  checks_file="$(change_dir "$change")/human-checks.md"
-
-  if grep -Eiq '^[[:space:]]*\|[[:space:]]*(pending|failed)[[:space:]]*\|' "$checks_file"; then
-    fail "$checks_file 仍有 pending 或 failed 的人工检查表格行"
-  fi
+  # 正向断言：表格必须存在、至少一行、每行状态为 passed 或 waived、waived 有豁免记录。
+  # 判定逻辑在 harness_checks.py，保证两个平台结论一致。
+  "$(resolve_python)" .harness/scripts/harness_checks.py human-checks "$1"
 }
 
 check_quality_docs_decision() {
@@ -76,8 +85,34 @@ check_quality_docs_decision() {
   fi
 }
 
+resolve_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    echo python3
+  elif command -v python >/dev/null 2>&1; then
+    echo python
+  else
+    fail "缺少命令: python3"
+  fi
+}
+
+show_status() {
+  local as_json="$1"
+  local python_bin
+  python_bin="$(resolve_python)"
+
+  # 状态投影与 dashboard 共用 .harness/scripts/harness_state.py，不在此重复实现。
+  if [ "$as_json" = "1" ]; then
+    "$python_bin" .harness/scripts/harness_state.py status --json
+  else
+    "$python_bin" .harness/scripts/harness_state.py status
+  fi
+}
+
 verify_change() {
   local change="$1"
+  local no_probe="$2"
+  local python_bin
+  python_bin="$(resolve_python)"
 
   require_command openspec
   require_change_files "$change"
@@ -85,11 +120,17 @@ verify_change() {
   echo "==> OpenSpec 严格校验: $change"
   openspec validate "$change" --strict
 
-  echo "==> 基础环境探针"
-  if [ -x "./init.sh" ]; then
-    ./init.sh
-  else
-    bash ./init.sh
+  echo "==> 仓库结构检查"
+  "$python_bin" .harness/scripts/harness_checks.py doc-refs
+  "$python_bin" .harness/scripts/harness_checks.py skills
+  "$python_bin" .harness/scripts/sync-feature-index.py --check
+
+  if [ "$no_probe" = "1" ]; then
+    echo "==> 环境探针: 跳过（--no-probe）"
+  elif "$python_bin" .harness/scripts/harness_checks.py probe-needed "$change"; then
+    echo "==> 基础环境探针"
+    # verify 已经跑过 openspec validate，探针无需再列一次变更。
+    SKIP_OPENSPEC_LIST=1 bash ./init.sh
   fi
 
   echo "==> verify 完成: $change"
@@ -97,59 +138,108 @@ verify_change() {
 
 close_change() {
   local change="$1"
+  local skip_specs="$2"
+  local no_probe="$3"
 
-  verify_change "$change"
+  verify_change "$change" "$no_probe"
   check_tasks_complete "$change"
   check_human_checks_clear "$change"
   check_quality_docs_decision "$change"
 
   echo "==> 归档变更: $change"
-  openspec archive "$change"
+  # -y 保证在无终端输入的 agent 会话中不会卡在交互确认上。
+  if [ "$skip_specs" = "1" ]; then
+    openspec archive "$change" -y --skip-specs
+  else
+    openspec archive "$change" -y
+  fi
+
+  echo "==> 收尾 current.json"
+  finalize_close "$change"
 
   echo "==> close 完成: $change"
 }
 
 reset_current() {
-  local current_file=".harness/current.json"
-  local today
-  today="$(date +%F)"
-
-  mkdir -p "$(dirname "$current_file")"
-  cat > "$current_file" <<EOF
-{
-  "schema_version": 1,
-  "active_change": null,
-  "candidate_changes": [],
-  "current_task": null,
-  "last_verified_task": null,
-  "working_files": [],
-  "blockers": [],
-  "next_action": null,
-  "dirty_assumptions": [],
-  "last_checkpoint": null,
-  "last_updated": "$today"
+  # schema 定义只存在于 harness_state.py，两个平台脚本都不再各写一份字面量 JSON。
+  "$(resolve_python)" .harness/scripts/harness_state.py reset-current
 }
-EOF
 
-  echo "==> 已清空 $current_file"
+sync_candidates() {
+  "$(resolve_python)" .harness/scripts/harness_state.py sync-candidates
+}
+
+finalize_close() {
+  "$(resolve_python)" .harness/scripts/harness_state.py finalize-close "$1"
 }
 
 command_name="${1:-}"
-change="${2:-}"
+shift || true
+
+change=""
+skip_specs=0
+as_json=0
+no_probe=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --skip-specs)
+      skip_specs=1
+      ;;
+    --json)
+      as_json=1
+      ;;
+    --no-probe)
+      no_probe=1
+      ;;
+    -*)
+      usage
+      fail "未知选项: $1"
+      ;;
+    *)
+      [ -z "$change" ] || { usage; fail "只能指定一个 change: $change / $1"; }
+      change="$1"
+      ;;
+  esac
+  shift
+done
 
 if [ -z "$command_name" ]; then
   usage
   exit 2
 fi
 
+if [ "$skip_specs" = "1" ] && [ "$command_name" != "close" ]; then
+  usage
+  fail "--skip-specs 只能与 close 一起使用"
+fi
+
+if [ "$as_json" = "1" ] && [ "$command_name" != "status" ]; then
+  usage
+  fail "--json 只能与 status 一起使用"
+fi
+
+if [ "$no_probe" = "1" ] && [ "$command_name" != "verify" ] && [ "$command_name" != "close" ]; then
+  usage
+  fail "--no-probe 只能与 verify 或 close 一起使用"
+fi
+
 case "$command_name" in
+  status)
+    [ -z "$change" ] || { usage; fail "status 不接受 change 参数"; }
+    show_status "$as_json"
+    ;;
+  sync-candidates)
+    [ -z "$change" ] || { usage; fail "sync-candidates 不接受 change 参数"; }
+    sync_candidates
+    ;;
   verify)
     [ -n "$change" ] || { usage; fail "verify 需要 <change>"; }
-    verify_change "$change"
+    verify_change "$change" "$no_probe"
     ;;
   close)
     [ -n "$change" ] || { usage; fail "close 需要 <change>"; }
-    close_change "$change"
+    close_change "$change" "$skip_specs" "$no_probe"
     ;;
   reset-current)
     reset_current

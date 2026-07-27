@@ -16,8 +16,10 @@ usage() {
   验证与归档请使用 .harness/scripts/harness verify|close <change>。
 
 可选环境变量:
+  SKIP_OPENSPEC_LIST=1      跳过 openspec list（调用方已经跑过校验时用）
+  UNITY_PROJECT_DIR=<path>  指定 Unity 子工程目录（默认 UnityProject/）
   UNITY_BIN=<path>          指定 Unity 可执行文件
-  REQUIRE_UNITY_PROJECT=1   当前目录不是 Unity 项目时失败
+  REQUIRE_UNITY_PROJECT=1   找不到 Unity 项目时失败
   RUN_UNITY_IMPORT=1        执行 Unity 导入/编译
   RUN_EDITMODE=1            执行 EditMode 测试
   RUN_PLAYMODE=1            执行 PlayMode 测试
@@ -25,8 +27,43 @@ usage() {
 USAGE
 }
 
+fail() {
+  echo "错误: $*" >&2
+  exit 1
+}
+
 is_unity_project() {
-  [ -d "Assets" ] && [ -f "Packages/manifest.json" ] && [ -d "ProjectSettings" ]
+  local candidate="$1"
+  [ -d "$candidate/Assets" ] && [ -f "$candidate/Packages/manifest.json" ] && [ -d "$candidate/ProjectSettings" ]
+}
+
+resolve_unity_project_dir() {
+  if [ -n "${UNITY_PROJECT_DIR:-}" ]; then
+    local candidate="$UNITY_PROJECT_DIR"
+    case "$candidate" in
+      /*) ;;
+      *) candidate="$ROOT_DIR/$candidate" ;;
+    esac
+
+    if ! is_unity_project "$candidate"; then
+      fail "UNITY_PROJECT_DIR 指向的目录不是完整 Unity 项目: $candidate"
+    fi
+
+    echo "$candidate"
+    return 0
+  fi
+
+  if is_unity_project "$ROOT_DIR"; then
+    echo "$ROOT_DIR"
+    return 0
+  fi
+
+  if is_unity_project "$ROOT_DIR/UnityProject"; then
+    echo "$ROOT_DIR/UnityProject"
+    return 0
+  fi
+
+  return 1
 }
 
 resolve_unity_bin() {
@@ -63,15 +100,17 @@ fi
 
 echo "==> 当前目录: $PWD"
 
-if command -v openspec >/dev/null 2>&1; then
+if [ "${SKIP_OPENSPEC_LIST:-0}" = "1" ]; then
+  echo "==> 跳过 OpenSpec 列表（SKIP_OPENSPEC_LIST=1）"
+elif command -v openspec >/dev/null 2>&1; then
   echo "==> OpenSpec 活跃变更"
   openspec list || true
 else
   echo "==> 未找到 openspec；跳过 OpenSpec 探针"
 fi
 
-if ! is_unity_project; then
-  message="当前目录不是完整 Unity 项目；缺少 Assets、Packages/manifest.json 或 ProjectSettings。"
+if ! UNITY_PROJECT_DIR_RESOLVED="$(resolve_unity_project_dir)"; then
+  message="当前目录及默认子目录 UnityProject/ 都不是完整 Unity 项目；缺少 Assets、Packages/manifest.json 或 ProjectSettings。"
   if [ "${REQUIRE_UNITY_PROJECT:-0}" = "1" ]; then
     echo "错误: $message" >&2
     exit 1
@@ -81,6 +120,8 @@ if ! is_unity_project; then
   echo "==> 按模板/文档仓库处理，跳过 Unity 导入和测试。"
   exit 0
 fi
+
+echo "==> Unity 项目: $UNITY_PROJECT_DIR_RESOLVED"
 
 if ! UNITY_BIN_RESOLVED="$(resolve_unity_bin)"; then
   message="未找到 Unity 可执行文件；可通过 UNITY_BIN 指定。"
@@ -97,25 +138,25 @@ fi
 echo "==> 使用编辑器: $UNITY_BIN_RESOLVED"
 
 if [ "${RUN_UNITY_IMPORT:-0}" = "1" ]; then
-  run_unity "$UNITY_BIN_RESOLVED" -batchmode -quit -nographics -projectPath "$ROOT_DIR" -logFile -
+  run_unity "$UNITY_BIN_RESOLVED" -batchmode -quit -nographics -projectPath "$UNITY_PROJECT_DIR_RESOLVED" -logFile -
 fi
 
 if [ "${RUN_EDITMODE:-0}" = "1" ]; then
-  run_unity "$UNITY_BIN_RESOLVED" -batchmode -nographics -projectPath "$ROOT_DIR" \
+  run_unity "$UNITY_BIN_RESOLVED" -batchmode -nographics -projectPath "$UNITY_PROJECT_DIR_RESOLVED" \
     -runTests -testPlatform EditMode -testResults "$ROOT_DIR/test-results-editmode.xml" -logFile -
 fi
 
 if [ "${RUN_PLAYMODE:-0}" = "1" ]; then
-  run_unity "$UNITY_BIN_RESOLVED" -batchmode -projectPath "$ROOT_DIR" \
+  run_unity "$UNITY_BIN_RESOLVED" -batchmode -projectPath "$UNITY_PROJECT_DIR_RESOLVED" \
     -runTests -testPlatform PlayMode -testResults "$ROOT_DIR/test-results-playmode.xml" -logFile -
 fi
 
 echo "==> Unity 启动命令:"
-printf '    %q' "$UNITY_BIN_RESOLVED" -projectPath "$ROOT_DIR"
+printf '    %q' "$UNITY_BIN_RESOLVED" -projectPath "$UNITY_PROJECT_DIR_RESOLVED"
 printf '\n'
 
 if [ "${RUN_START_COMMAND:-0}" = "1" ]; then
-  exec "$UNITY_BIN_RESOLVED" -projectPath "$ROOT_DIR"
+  exec "$UNITY_BIN_RESOLVED" -projectPath "$UNITY_PROJECT_DIR_RESOLVED"
 fi
 
 echo "==> 环境探针完成。需要实际验证时，请按质量契约设置 RUN_UNITY_IMPORT/RUN_EDITMODE/RUN_PLAYMODE。"
