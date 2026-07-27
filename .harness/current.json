@@ -1,13 +1,17 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "active_change": null,
   "candidate_changes": [],
+  "change_context": {},
   "current_task": null,
   "last_verified_task": null,
   "working_files": [],
+  "deleted_files": [],
   "blockers": [],
   "next_action": null,
   "dirty_assumptions": [],
   "last_checkpoint": null,
-  "last_updated": "2026-07-05"
+  "last_updated": "2026-07-27",
+  "last_change_note": null,
+  "verification_summary": null
 }

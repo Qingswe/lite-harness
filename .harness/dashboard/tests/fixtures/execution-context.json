@@ -1,0 +1,85 @@
+{
+  "canonical_v2": {
+    "schema_version": 2,
+    "active_change": null,
+    "candidate_changes": [
+      "released-human",
+      "direction-gated"
+    ],
+    "change_context": {
+      "released-human": {
+        "phase": "awaiting_human",
+        "summary": "Automatic verification complete.",
+        "blockers": [
+          "Two human checks remain."
+        ],
+        "next_action": "Run the human checks.",
+        "last_checkpoint": ".harness/checkpoints/released-human/latest.md",
+        "last_updated": "2026-07-24"
+      },
+      "direction-gated": {
+        "phase": "awaiting_user_direction",
+        "summary": "A follow-up task requires authorization.",
+        "blockers": [
+          "Explicit user direction is required."
+        ],
+        "next_action": "Wait for explicit direction.",
+        "last_checkpoint": ".harness/checkpoints/direction-gated/latest.md",
+        "last_updated": "2026-07-24"
+      }
+    }
+  },
+  "legacy_annotated": {
+    "schema_version": 1,
+    "active_change": null,
+    "candidate_changes": [
+      "released-human (Automatic verification complete; two human checks remain.)",
+      "direction-gated (A follow-up task requires explicit authorization.)",
+      "released-human (duplicate annotation must not duplicate membership)"
+    ]
+  },
+  "released_human_and_direction": {
+    "schema_version": 2,
+    "active_change": null,
+    "candidate_changes": [
+      "released-human"
+    ],
+    "change_context": {
+      "released-human": {
+        "phase": "awaiting_human_and_user_direction",
+        "summary": "Automatic verification complete.",
+        "blockers": [
+          "Three human checks remain.",
+          "Task 7.6 requires explicit direction."
+        ],
+        "next_action": "Run human checks and wait for direction.",
+        "last_checkpoint": ".harness/checkpoints/released-human/latest.md",
+        "last_updated": "2026-07-24"
+      }
+    }
+  },
+  "active_owner": {
+    "schema_version": 2,
+    "active_change": "active-owner",
+    "candidate_changes": [
+      "planned-candidate"
+    ],
+    "change_context": {
+      "active-owner": {
+        "phase": "implementing",
+        "summary": "Owns the execution slot.",
+        "blockers": [],
+        "next_action": "Continue implementation.",
+        "last_checkpoint": null,
+        "last_updated": "2026-07-24"
+      }
+    }
+  },
+  "malformed_legacy": {
+    "schema_version": 1,
+    "active_change": null,
+    "candidate_changes": [
+      "missing-change (This prefix does not resolve.)"
+    ]
+  }
+}
