@@ -323,6 +323,20 @@ def parse_step_identities(blob):
     return out
 
 
+def parse_migrated_flags(blob):
+    """从一段 verification.json 文本取 {step id: 是否为迁移步骤}。"""
+    if not blob:
+        return {}
+    try:
+        data = json.loads(blob)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(s.get("id")): bool(s.get("migrated"))
+            for s in data.get("steps", []) if isinstance(s, dict)}
+
+
 def step_counts(steps):
     counts = {name: 0 for name in STATUSES}
     for step in steps:

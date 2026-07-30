@@ -101,6 +101,42 @@ def table_rows(text, heading, min_cells=5):
     return rows
 
 
+def section_blocks(text, heading):
+    """取某小节的内容，保留其中的 `###` 子小节结构。
+
+    旧 quality-contract 常把「必须验证」分成「本轮」与「实现阶段」两个子小节，
+    两者对同一项（如 EditMode）的结论正好相反。压平后同一节里会同时出现
+    「不适用」和「必须运行」，读者无从判断各属哪个阶段——层级本身就是信息。
+    """
+    blocks = [(None, [])]
+    for line in hv.section_lines(text, heading):
+        stripped = line.strip()
+        m = re.match(r"^#{3,6}\s+(.*)$", stripped)
+        if m:
+            blocks.append((m.group(1).strip(), []))
+            continue
+        if not stripped.startswith("-"):
+            continue
+        item = stripped.lstrip("-").strip()
+        if item and item.lower() not in ("无", "无。", "n/a", "none", ""):
+            blocks[-1][1].append(item)
+    return [(title, items) for title, items in blocks if items]
+
+
+def render_blocks(blocks, empty_note):
+    out = []
+    if not blocks:
+        return ["- **%s**：%s" % (TODO, empty_note)]
+    for title, items in blocks:
+        if title:
+            out.append("### %s" % title)
+            out.append("")
+        out.extend("- %s" % i for i in items)
+        if title:
+            out.append("")
+    return out
+
+
 def bullets(text, heading):
     out = []
     for line in hv.section_lines(text, heading):
@@ -219,23 +255,17 @@ def build_program(change_id, contract_text, rules):
         out.append("- **%s**：原记录未以不变量形式声明约束。" % TODO)
         out.append("")
 
-    must = bullets(contract_text, "必须验证")
     out.append("## 必须验证")
     out.append("")
-    if must:
-        for item in must:
-            out.append("- %s" % item)
-    else:
-        out.append("- **%s**：原 `quality-contract.md` 未声明必须验证的范围。" % TODO)
+    out.extend(render_blocks(section_blocks(contract_text, "必须验证"),
+                             "原 `quality-contract.md` 未声明必须验证的范围。"))
     out.append("")
 
     out.append("## 不验证及理由")
     out.append("")
-    if skipped:
-        for item in skipped:
-            out.append("- %s" % item)
-    else:
-        out.append("- **%s**：原记录未声明不验证范围。" % TODO)
+    out.extend(render_blocks(
+        section_blocks(contract_text, "AI 无法自行验证的内容"),
+        "原记录未声明不验证范围。"))
     out.append("")
 
     out.append("## 可观测性与回滚")
@@ -396,6 +426,7 @@ def build_quality_docs(verification_text):
 CARRIED_SECTIONS = (
     ("verification.md", "人工豁免"),
     ("verification.md", "最终结论"),
+    ("verification.md", "质量文档判断"),
     ("human-checks.md", "失败记录"),
     ("human-checks.md", "豁免记录"),
 )

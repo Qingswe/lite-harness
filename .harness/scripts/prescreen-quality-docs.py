@@ -39,8 +39,10 @@ TEST_PATH_RE = re.compile(r"(^|/)(test|tests|Tests|Editor/Tests)/|"
                           r"(_|\.)?[Tt]est[s]?\.(cs|py)$")
 IMPL_PATH_RE = re.compile(r"^(UnityProject/Assets/GameScripts/|src/|"
                           r"\.harness/scripts/)")
-DEBT_MARKER_RE = re.compile(r"^\+.*\b(TODO|FIXME|HACK|XXX|临时|待办|workaround)\b",
-                            re.IGNORECASE)
+# 只认真正的债务标记，不认散文里提到这些词。曾把
+# 「本轮未留下延期修复、workaround 或测试缺口」这句**说明没有债务**的话
+# 判成新增债务——大小写不敏感 + 中文词让它把叙述当成了标记。
+DEBT_MARKER_RE = re.compile(r"^\+.*(?:^|[\s(（#/*])(TODO|FIXME|HACK|XXX)[\s:：)]")
 
 # 无法机械判定：只能由人决定。
 MANUAL_DOCS = (
@@ -149,9 +151,15 @@ def prescreen(change_id):
             "basis": basis,
         })
 
+    # 归因不到任何路径时，「未触发」与「判不出来」是两回事，必须说出来：
+    # 跨多个 change 的基础设施提交被排除在归因之外，若某个 change 的实现全部
+    # 混在这类提交里，机械判据就没有输入可用，此时结论不可当作「确实不需要」。
+    inconclusive = not paths
+
     return {
         "prescreen_run": date.today().isoformat(),
         "changed_paths": len(paths),
+        "inconclusive": inconclusive,
         "evaluated": evaluated,
         "triggered": triggered,
         "manual": [{"doc": doc, "question": q} for doc, q in MANUAL_DOCS],
@@ -174,6 +182,7 @@ def write_back(change_id, result):
         for item in result["triggered"]
     ]
     quality["evaluated"] = result["evaluated"]
+    quality["inconclusive"] = result["inconclusive"]
     quality["manual"] = result["manual"]
 
     body = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
@@ -236,6 +245,9 @@ def main(argv):
 
     print("==> 质量文档预筛: %s（%d 个改动路径）"
           % (change_id, result["changed_paths"]))
+    if result["inconclusive"]:
+        print("\n注意：归因不到任何改动路径（实现可能全在跨 change 的基础设施提交里）。"
+              "\n下面的「未触发」只代表机械判据没有输入，不等于确实不需要更新，请人工复核。")
     print("\n机械判定过的条目（依据由脚本给出，未触发的不需要人写理由）：")
     for item in result["evaluated"]:
         print("  %-28s %-6s %s" % (item["doc"],

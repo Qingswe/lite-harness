@@ -291,25 +291,46 @@ def changed_paths(change_id):
     优先用 verification.json 记录的 baseline_commit 与工作区比较——只看未提交
     改动会让已经提交的实现从下限计算里消失，那正是下限最需要生效的时候。
     """
-    baseline = None
-    try:
-        baseline = hv.load_verification(change_id).get("baseline_commit")
-    except hv.VerificationFormatError:
-        pass
+    own_dir = "openspec/changes/%s/" % change_id
+    paths = set()
 
-    candidates = []
-    if baseline:
-        candidates.append(["diff", "--name-only", baseline])
-    candidates.append(["diff", "--name-only", "HEAD"])
-
-    for args in candidates:
-        out = _git(args)
-        if out is None:
+    # 只算「和本 change 一起被改动过」的文件：取触及本 change 目录的提交，
+    # 收集它们改到的其他路径。用 baseline..HEAD 会把此后仓库里发生的一切都
+    # 算进来——实测某个老 change 因此被算成触及 921 个文件、风险下限被拉满。
+    log = _git(["log", "--format=%H", "--", own_dir.rstrip("/")]) or ""
+    for commit in [l.strip() for l in log.splitlines() if l.strip()]:
+        names = [n.strip() for n in
+                 (_git(["show", "--name-only", "--format=", commit]) or "").splitlines()
+                 if n.strip()]
+        # 跨多个 change 的提交是基础设施改动（迁移、模板、脚本），不是这个
+        # change 干的活。不排掉的话，一次迁移会把 harness 自身的改动记到每一个
+        # 被迁移的 change 头上——实测让一个纯文档 change 认领了 114 个文件。
+        touched_changes = {n.split("/")[2] for n in names
+                           if n.startswith("openspec/changes/")
+                           and len(n.split("/")) > 3}
+        if len(touched_changes) > 1:
             continue
-        paths = [l.strip() for l in out.splitlines() if l.strip()]
-        if paths:
-            return paths
-    return []
+        for name in names:
+            if not name.startswith(own_dir):
+                paths.add(name)
+
+    # 正在实施的那个 change 还要算上未提交的工作树改动。
+    if change_id == active_change():
+        out = _git(["diff", "--name-only", "HEAD"]) or ""
+        for name in out.splitlines():
+            name = name.strip()
+            if name and not name.startswith(own_dir):
+                paths.add(name)
+
+    return sorted(paths)
+
+
+def active_change():
+    harness_state.configure_root(ROOT)
+    data = harness_state.load_current()
+    if not isinstance(data, dict):
+        return None
+    return data.get("active_change")
 
 
 # 下限衡量的是实现风险，文档与产物不参与计算。
@@ -402,11 +423,16 @@ def check_role_isolation(change_id, generator_identity=None):
         # 人工作答/豁免的步骤不受提交级断言约束：这条断言防的是「实现者给自己
         # 的产出打分」，而人记录自己的决定不属于那件事。身份校验早就豁免了
         # agent == "human"，两处必须一致，否则同一件事在两道闸门下结论相反。
-        identities = hv.parse_step_identities(_git(["show", "%s:%s" % (commit, relpath)]))
+        blob = _git(["show", "%s:%s" % (commit, relpath)])
+        identities = hv.parse_step_identities(blob)
+        migrated = hv.parse_migrated_flags(blob)
         promoted = [sid for sid, status in after.items()
                     if status in hv.TERMINAL_STATUSES
                     and before.get(sid) != status
-                    and identities.get(sid) != "human"]
+                    and identities.get(sid) != "human"
+                    # 迁移只是把历史结论转写进新格式，不是产出结论。
+                    # 不豁免的话每个迁移过的 change 都永久带着这条违规。
+                    and not migrated.get(sid)]
         if not promoted:
             continue
         names = _git(["show", "--name-only", "--format=", commit]) or ""
@@ -593,7 +619,15 @@ def change_readiness(change, run_strict=True):
         blockers.append({"criterion": "risk-floor", "detail": problem,
                          "owner": "ai"})
 
-    return {"change": change_id, "ready": not blockers, "blockers": blockers}
+    # lint 与预筛会报同一件事，去重后责任方与条数才对得上。
+    seen, unique = set(), []
+    for b in blockers:
+        key = b["detail"]
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(b)
+    return {"change": change_id, "ready": not unique, "blockers": unique}
 
 
 OWNER_LABEL = {"human": "人", "ai": "AI", "external": "外部"}
