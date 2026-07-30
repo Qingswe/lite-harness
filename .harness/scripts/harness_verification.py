@@ -297,6 +297,29 @@ def parse_statuses(blob):
             for s in data.get("steps", []) if isinstance(s, dict)}
 
 
+def parse_step_identities(blob):
+    """从一段 verification.json 文本取 {step id: evaluated_by.agent}。
+
+    与 parse_statuses 一样，解析留在本模块；调用方只负责取 blob。
+    """
+    if not blob:
+        return {}
+    try:
+        data = json.loads(blob)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for step in data.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        identity = step.get("evaluated_by") or {}
+        agent = identity.get("agent") if isinstance(identity, dict) else None
+        out[str(step.get("id"))] = str(agent or "").strip().lower()
+    return out
+
+
 def step_counts(steps):
     counts = {name: 0 for name in STATUSES}
     for step in steps:

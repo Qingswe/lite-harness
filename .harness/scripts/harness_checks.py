@@ -399,9 +399,14 @@ def check_role_isolation(change_id, generator_identity=None):
     for commit in [l.strip() for l in log.splitlines() if l.strip()]:
         before = _statuses_at(commit + "^", relpath)
         after = _statuses_at(commit, relpath)
+        # 人工作答/豁免的步骤不受提交级断言约束：这条断言防的是「实现者给自己
+        # 的产出打分」，而人记录自己的决定不属于那件事。身份校验早就豁免了
+        # agent == "human"，两处必须一致，否则同一件事在两道闸门下结论相反。
+        identities = hv.parse_step_identities(_git(["show", "%s:%s" % (commit, relpath)]))
         promoted = [sid for sid, status in after.items()
                     if status in hv.TERMINAL_STATUSES
-                    and before.get(sid) != status]
+                    and before.get(sid) != status
+                    and identities.get(sid) != "human"]
         if not promoted:
             continue
         names = _git(["show", "--name-only", "--format=", commit]) or ""

@@ -347,6 +347,16 @@ class RoleIsolationTests(LoopTestCase):
         self.assertEqual([], harness_checks.check_role_isolation(
             "alpha", {"agent": "human", "model": "human"}))
 
+    def test_parse_step_identities_reads_evaluator_agent(self):
+        blob = json.dumps({"steps": [
+            {"id": "V1", "evaluated_by": {"agent": "Harness-Evaluator"}},
+            {"id": "H1", "evaluated_by": {"agent": "human"}},
+            {"id": "V2", "evaluated_by": None}]})
+        got = hv.parse_step_identities(blob)
+        self.assertEqual("harness-evaluator", got["V1"])
+        self.assertEqual("human", got["H1"])
+        self.assertEqual("", got["V2"])
+
     def test_parse_statuses_is_the_single_entry_point(self):
         blob = json.dumps({"steps": [{"id": "V1", "status": "PASSED"}]})
         self.assertEqual({"V1": "passed"}, hv.parse_statuses(blob))
