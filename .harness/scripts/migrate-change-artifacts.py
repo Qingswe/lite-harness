@@ -60,6 +60,21 @@ def read(path):
         return ""
 
 
+# Markdown 表格里 `\|` 是转义的竖线，不是列分隔符。按裸 `|` 切会把
+# `grep -rn "A\|B\|C"` 这样的单元格切成好几列——一个 3 列的行因此凑够 5 列，
+# 被当成验证记录行收进来，内容还被拦腰截断。
+CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+
+
+def split_cells(line):
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|"):
+        body = body[:-1]
+    return [c.strip().replace("\\|", "|") for c in CELL_SPLIT_RE.split(body)]
+
+
 def table_rows(text, heading, min_cells=5):
     """取某小节里全部表格的数据行。
 
@@ -75,7 +90,7 @@ def table_rows(text, heading, min_cells=5):
         if not stripped.startswith("|"):
             in_table = False
             continue
-        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        cells = split_cells(stripped)
         if all(set(c) <= set("-: ") and c for c in cells):
             in_table = True          # 分隔行：其后是数据行
             continue
@@ -201,14 +216,38 @@ def build_program(change_id, contract_text, rules):
     if risk in ("medium", "high", "critical"):
         out.append("## 约束")
         out.append("")
-        if observability or rollback:
-            for item in observability:
-                out.append("- 可观测性：%s" % item)
-            for item in rollback:
-                out.append("- 回滚方式：%s" % item)
-        else:
-            out.append("- **%s**：原记录未声明可观测性与回滚方式。" % TODO)
+        out.append("- **%s**：原记录未以不变量形式声明约束。" % TODO)
         out.append("")
+
+    must = bullets(contract_text, "必须验证")
+    out.append("## 必须验证")
+    out.append("")
+    if must:
+        for item in must:
+            out.append("- %s" % item)
+    else:
+        out.append("- **%s**：原 `quality-contract.md` 未声明必须验证的范围。" % TODO)
+    out.append("")
+
+    out.append("## 不验证及理由")
+    out.append("")
+    if skipped:
+        for item in skipped:
+            out.append("- %s" % item)
+    else:
+        out.append("- **%s**：原记录未声明不验证范围。" % TODO)
+    out.append("")
+
+    out.append("## 可观测性与回滚")
+    out.append("")
+    if observability or rollback:
+        for item in observability:
+            out.append("- 可观测性：%s" % item)
+        for item in rollback:
+            out.append("- 回滚方式：%s" % item)
+    else:
+        out.append("- **%s**：原记录未声明可观测性与回滚方式。" % TODO)
+    out.append("")
 
     out.append("## 评估规则")
     out.append("")
@@ -227,14 +266,6 @@ def build_program(change_id, contract_text, rules):
         out.append("- 需人工：存在 `role: human` 且未作答的步骤。")
         out.append("")
 
-    out.append("## 不验证及理由")
-    out.append("")
-    if skipped:
-        for item in skipped:
-            out.append("- %s" % item)
-    else:
-        out.append("- **%s**：原记录未声明不验证范围。" % TODO)
-    out.append("")
     return "\n".join(out)
 
 

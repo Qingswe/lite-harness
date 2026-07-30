@@ -633,6 +633,30 @@ def lint(change_id):
 # 就绪度（验证记录侧）
 # --------------------------------------------------------------------------
 
+SUMMARY_MAX = 96
+
+
+def step_summary(step):
+    """一行可执行摘要：不打开 change 目录也知道这一步要干什么。
+
+    人工步骤取「看哪里 + 什么算通过」，自动步骤取执行方式——`harness ready` 只给
+    步骤 id 时，人仍然得逐个打开目录才能判断，等于没有真正给出下一个动作。
+    """
+    role = str(step.get("role") or "").lower()
+    if role == "human":
+        parts = [step.get("observe"), step.get("pass_when")]
+    else:
+        parts = [step.get("how"), step.get("pass_when")]
+    for raw in parts:
+        text = " ".join(str(raw or "").split())
+        # 迁移占位符没有信息量，跳过去找下一个字段。
+        if text.startswith("迁移时补录"):
+            text = text.split("原文：", 1)[-1].split("原结果：", 1)[-1].strip()
+        if len(text) >= 8:
+            return text[:SUMMARY_MAX] + ("…" if len(text) > SUMMARY_MAX else "")
+    return "（该步骤未写明要求）"
+
+
 def verification_readiness(change_id):
     """验证记录侧的就绪判据。
 
@@ -661,8 +685,9 @@ def verification_readiness(change_id):
         owner = {"human": "human", "external": "external"}.get(role, "ai")
         blockers.append({
             "criterion": "step-status",
-            "detail": "步骤 %s（%s）状态为 %s" % (step.get("id"), role, status
-                                              or "缺失"),
+            "detail": "步骤 %s（%s）状态为 %s：%s"
+                      % (step.get("id"), role, status or "缺失",
+                         step_summary(step)),
             "owner": owner,
         })
 
@@ -821,10 +846,15 @@ def render_markdown(change_id, full=False):
     if data.get("note"):
         out.extend(["", data["note"]])
 
-    out.extend(["", "## 步骤", "",
-                "| 步骤 | 角色 | 规则 | 状态 | 任务 | 证据 |",
-                "| --- | --- | --- | --- | --- | --- |"])
-    for step in data["steps"]:
+    table_steps = data["steps"] if full else [
+        s for s in data["steps"]
+        if str(s.get("status") or "").lower() in TERMINAL_STATUSES
+        and str(s.get("role") or "").lower() != "human"]
+    if table_steps:
+        out.extend(["", "## 已完成的自动步骤" if not full else "## 步骤", "",
+                    "| 步骤 | 角色 | 规则 | 状态 | 任务 | 证据 |",
+                    "| --- | --- | --- | --- | --- | --- |"])
+    for step in table_steps:
         evidence = step.get("evidence") or []
         out.append("| %s | %s | %s | %s | %s | %s |" % (
             step.get("id") or "—",
@@ -850,19 +880,37 @@ def render_markdown(change_id, full=False):
         out.append("> 已折叠 %d 个已通过的自动步骤；`--full` 展开全部。" % hidden)
         out.append("")
     for step in detailed:
-        out.append("### %s（%s）" % (step.get("id"), step.get("role")))
-        out.append("")
-        if step.get("how"):
-            out.append("- 执行方式：`%s`" % step["how"])
-        if step.get("observe"):
-            out.append("- 观察对象：%s" % step["observe"])
-        out.append("- 通过：%s" % (step.get("pass_when") or "—"))
-        out.append("- 失败：%s" % (step.get("fail_when") or "—"))
-        if step.get("needs_human_because"):
-            out.append("- 需人理由：%s" % step["needs_human_because"])
-        if step.get("note"):
-            out.append("- 说明：%s" % step["note"])
-        out.append("")
+        if full:
+            out.append("### %s（%s）" % (step.get("id"), step.get("role")))
+            out.append("")
+            if step.get("how"):
+                out.append("- 执行方式：`%s`" % step["how"])
+            if step.get("observe"):
+                out.append("- 观察对象：%s" % step["observe"])
+            out.append("- 通过：%s" % (step.get("pass_when") or "—"))
+            out.append("- 失败：%s" % (step.get("fail_when") or "—"))
+            if step.get("needs_human_because"):
+                out.append("- 需人理由：%s" % step["needs_human_because"])
+            if step.get("note"):
+                out.append("- 说明：%s" % step["note"])
+            out.append("")
+        else:
+            # 紧凑模式：去掉每步的标题行与空行，字段并进带前缀的连续行。
+            # 内容一个字不少，只是不再为每一步花掉三行版面。
+            out.append("**%s**（%s，%s）"
+                       % (step.get("id"), step.get("role"),
+                          step.get("status") or "—"))
+            if step.get("how"):
+                out.append("- 执行：`%s`" % step["how"])
+            if step.get("observe"):
+                out.append("- 观察：%s" % step["observe"])
+            out.append("- 通过：%s" % (step.get("pass_when") or "—"))
+            out.append("- 失败：%s" % (step.get("fail_when") or "—"))
+            if step.get("needs_human_because"):
+                out.append("- 需人：%s" % step["needs_human_because"])
+            if step.get("note"):
+                out.append("- 说明：%s" % step["note"])
+            out.append("")
 
     uncovered = data.get("uncovered") or []
     out.extend(["## 未覆盖内容", ""])
