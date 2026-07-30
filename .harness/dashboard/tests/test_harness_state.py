@@ -67,7 +67,8 @@ class SharedImplementationTests(unittest.TestCase):
         bash = (scripts / "harness").read_text(encoding="utf-8")
         pwsh = (scripts / "harness.ps1").read_text(encoding="utf-8")
         for command in ("status", "ready", "next", "lint", "render", "verify",
-                        "close", "sync-candidates", "reset-current"):
+                        "close", "rollback", "autoclose", "sync-candidates",
+                        "reset-current"):
             self.assertIn('"%s"' % command, pwsh,
                           "harness.ps1 缺少子命令 %s" % command)
             self.assertIn(command, bash, "harness 缺少子命令 %s" % command)

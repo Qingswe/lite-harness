@@ -13,6 +13,7 @@ usage() {
   .harness/scripts/harness ready [--json]
   .harness/scripts/harness next [--json]
   .harness/scripts/harness autoclose [--dry-run]
+  .harness/scripts/harness rollback <change>
   .harness/scripts/harness lint <change>
   .harness/scripts/harness check <change> <step> <status> [--by <人>]
                                  [--note <说明>] [--evidence <路径>]
@@ -30,6 +31,8 @@ usage() {
   next   输出循环的下一个动作：目标 change、目标 task 与应派出的角色。
   autoclose 归档全部就绪的 change，按依赖顺序。就绪度成立即执行，不要求人工
          逐个确认；每个 change 仍然走完整 close 与 ratchet。--dry-run 只列出。
+  rollback 把仓库退回某次归档之前。close 会把归档结果提交，因此 reset 到
+         回滚点即可完整还原；残留未跟踪文件会被报错而不是当作成功。
   lint   运行与 close 完全相同的门槛断言但不归档，任何时刻可跑。
   check  按 step id 写入验证结论，格式由命令保证。
   render 把 verification.json 渲染成 markdown 供人阅读（事实来源仍是 JSON）。
@@ -222,7 +225,57 @@ close_change() {
   echo "==> 同步能力索引"
   "$(resolve_python)" .harness/scripts/sync-feature-index.py
 
+  # 归档结果必须落进一个提交，否则 ratchet 是假的：`openspec archive` 产生的
+  # 归档目录与新 spec 目录都是**未跟踪**文件，`git reset --hard <tag>` 根本不
+  # 碰它们，回滚后它们仍在原地。那是部分回滚——比不能回滚更危险，因为它让人
+  # 以为已经退回。提交之后，tag 到 HEAD 之间是一个干净的差异，reset 才真的还原。
+  commit_archive "$change"
+
   echo "==> close 完成: $change"
+}
+
+commit_archive() {
+  local change="$1"
+  command -v git >/dev/null 2>&1 || fail "缺少 git：归档结果必须可提交，否则回滚点无效"
+
+  git add -A openspec .harness >/dev/null
+  if git diff --cached --quiet; then
+    echo "==> 归档无内容变化，跳过提交"
+    return 0
+  fi
+  git commit -q -m "Archive $change" \
+    || fail "归档结果提交失败；此时 ratchet 不成立，请人工处理"
+  echo "==> 归档结果已提交（回滚用 harness rollback $change）"
+}
+
+rollback_change() {
+  # 单条命令把仓库退回归档之前。
+  local change="$1"
+  local tag="harness/pre-close/$change"
+
+  require_command git
+  git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1 \
+    || fail "找不到回滚点 $tag"
+
+  local dirty
+  dirty="$(git status --porcelain)"
+  if [ -n "$dirty" ]; then
+    fail "工作树不干净，回滚会丢弃这些改动；请先提交或清理：
+$dirty"
+  fi
+
+  echo "==> 回滚到 $tag"
+  git reset --hard "$tag"
+
+  # 提交之后归档产物都是已跟踪内容，reset 即可还原；这里再断言一次，
+  # 残留未跟踪文件说明 close 没有提交成功，属于部分回滚，必须报错。
+  local residue
+  residue="$(git status --porcelain)"
+  if [ -n "$residue" ]; then
+    fail "回滚后仍有残留，属于部分回滚：
+$residue"
+  fi
+  echo "==> 回滚完成，工作树干净"
 }
 
 reset_current() {
@@ -331,6 +384,10 @@ case "$command_name" in
   lint)
     [ -n "$change" ] || { usage; fail "lint 需要 <change>"; }
     lint_change "$change"
+    ;;
+  rollback)
+    [ -n "$change" ] || { usage; fail "rollback 需要 <change>"; }
+    rollback_change "$change"
     ;;
   render)
     [ -n "$change" ] || { usage; fail "render 需要 <change>"; }

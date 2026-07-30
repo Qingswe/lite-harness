@@ -24,6 +24,7 @@ function Show-Usage {
     Write-Output "  .\.harness\scripts\harness.ps1 ready [-Json]"
     Write-Output "  .\.harness\scripts\harness.ps1 next [-Json]"
     Write-Output "  .\.harness\scripts\harness.ps1 autoclose [-DryRun]"
+    Write-Output "  .\.harness\scripts\harness.ps1 rollback <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 lint <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 render <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 sync-candidates"
@@ -199,7 +200,44 @@ function Invoke-Close([string]$ChangeId, [bool]$SkipSpecUpdates, [bool]$SkipProb
     & $Python (Join-Path $PSScriptRoot "sync-feature-index.py")
     if ($LASTEXITCODE -ne 0) { Fail "Failed to sync feature-index.json after archiving." }
 
+    # The archive result must land in a commit, otherwise the ratchet is fake:
+    # the archive directory and any new spec directory are UNTRACKED, and
+    # `git reset --hard <tag>` does not touch them. That is a partial rollback,
+    # which is worse than none because it looks like it worked.
+    Invoke-CommitArchive $ChangeId
+
     Write-Output "==> close completed: $ChangeId"
+}
+
+function Invoke-CommitArchive([string]$ChangeId) {
+    Require-Command "git"
+    & git add -A openspec .harness | Out-Null
+    & git diff --cached --quiet
+    if ($LASTEXITCODE -eq 0) {
+        Write-Output "==> Archive produced no changes; skipping commit."
+        return
+    }
+    & git commit -q -m "Archive $ChangeId"
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Could not commit the archive result; the ratchet does not hold."
+    }
+    Write-Output "==> Archive committed (roll back with harness.ps1 rollback $ChangeId)"
+}
+
+function Invoke-Rollback([string]$ChangeId) {
+    Require-Command "git"
+    $Tag = "harness/pre-close/$ChangeId"
+    & git rev-parse -q --verify "refs/tags/$Tag" > $null 2>&1
+    if ($LASTEXITCODE -ne 0) { Fail "No rollback point $Tag." }
+
+    $Dirty = (& git status --porcelain | Out-String).Trim()
+    if ($Dirty) { Fail "Working tree is not clean; rollback would discard:`n$Dirty" }
+
+    Write-Output "==> Rolling back to $Tag"
+    & git reset --hard $Tag
+    $Residue = (& git status --porcelain | Out-String).Trim()
+    if ($Residue) { Fail "Residue after rollback -- this is a partial rollback:`n$Residue" }
+    Write-Output "==> Rollback complete; working tree clean"
 }
 
 function Invoke-StateCommand([string[]]$StateArgs) {
@@ -325,6 +363,10 @@ switch ($Command) {
     "lint" {
         Require-ChangeArg "lint" $Change
         Invoke-Lint $Change
+    }
+    "rollback" {
+        Require-ChangeArg "rollback" $Change
+        Invoke-Rollback $Change
     }
     "render" {
         Require-ChangeArg "render" $Change
