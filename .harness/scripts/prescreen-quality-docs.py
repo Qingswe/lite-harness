@@ -130,9 +130,29 @@ def prescreen(change_id):
         "reason": "",
     })
 
+    # 「沉默即未触发」省掉了人写理由的仪式，但也让人分不清「判断过、确实不需要」
+    # 与「根本没判断」。evaluated 记录每一条被机械判定过的文档及其未触发依据——
+    # 依据由脚本生成，不要求人写，因此没有恢复旧仪式，但结论仍然可审查。
+    triggered_docs = {item["doc"] for item in triggered}
+    evaluated = []
+    for doc, basis in (
+            ("docs/quality/scorecard.md",
+             "实现路径 %d 处、测试路径 %d 处" % (len(impl), len(tests))),
+            ("docs/quality/tech-debt.md",
+             "diff 新增债务标记 %d 处" % len(debt_lines)),
+            ("docs/quality/risks.md",
+             "触及高影响路径 %d 处" % len(risk_reasons)),
+            ("docs/knowledge/changes/", "每个 close 的 change 恒触发")):
+        evaluated.append({
+            "doc": doc,
+            "triggered": doc in triggered_docs,
+            "basis": basis,
+        })
+
     return {
         "prescreen_run": date.today().isoformat(),
         "changed_paths": len(paths),
+        "evaluated": evaluated,
         "triggered": triggered,
         "manual": [{"doc": doc, "question": q} for doc, q in MANUAL_DOCS],
     }
@@ -153,6 +173,7 @@ def write_back(change_id, result):
          "reason": existing.get(item["doc"]) or item["reason"]}
         for item in result["triggered"]
     ]
+    quality["evaluated"] = result["evaluated"]
     quality["manual"] = result["manual"]
 
     body = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
@@ -215,6 +236,11 @@ def main(argv):
 
     print("==> 质量文档预筛: %s（%d 个改动路径）"
           % (change_id, result["changed_paths"]))
+    print("\n机械判定过的条目（依据由脚本给出，未触发的不需要人写理由）：")
+    for item in result["evaluated"]:
+        print("  %-28s %-6s %s" % (item["doc"],
+                                   "触发" if item["triggered"] else "未触发",
+                                   item["basis"]))
     print("\n触发（需人工写理由）：")
     for item in result["triggered"]:
         print("  %-28s %s" % (item["doc"], item["evidence"]))

@@ -35,9 +35,18 @@ PROGRAM = """# Program — alpha
 | --- | --- | --- |
 | `R1` | 目视确认 | 见步骤 |
 
+## 必须验证
+
+- 单元测试：跑 harness 回归套件。
+
 ## 不验证及理由
 
 - EditMode：不执行，不触及 Unity。
+
+## 可观测性与回滚
+
+- 日志：脚本 stderr。
+- 回滚方式：git revert。
 """
 
 

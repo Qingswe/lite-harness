@@ -17,7 +17,7 @@ usage() {
   .harness/scripts/harness lint <change>
   .harness/scripts/harness check <change> <step> <status> [--by <人>]
                                  [--note <说明>] [--evidence <路径>] [--commit]
-  .harness/scripts/harness render <change>
+  .harness/scripts/harness render <change> [--full]
   .harness/scripts/harness sync-candidates
   .harness/scripts/harness verify <change> [--no-probe]
   .harness/scripts/harness close <change> [--skip-specs] [--no-probe]
@@ -37,6 +37,7 @@ usage() {
   check  按 step id 写入验证结论，格式由命令保证。加 --commit 时把验证记录
          单独提交，从构造上保证它不与实现改动同处一个提交。
   render 把 verification.json 渲染成 markdown 供人阅读（事实来源仍是 JSON）。
+         默认紧凑：只展开人工步骤与未通过步骤；--full 展开全部。
   sync-candidates 按 openspec/changes/ 的实际内容重写候选集合；候选成员关系
          不由人工维护，per-change context 原样保留。
   verify 负责 OpenSpec 严格校验、仓库结构检查（文档引用路径、skill 一致性、
@@ -154,7 +155,8 @@ check_step() {
 }
 
 render_verification() {
-  "$(resolve_python)" .harness/scripts/harness_verification.py render "$1"
+  # 默认紧凑视图；--full 展开全部判定契约与迁移原文。
+  "$(resolve_python)" .harness/scripts/harness_verification.py render "$@"
 }
 
 autoclose_ready() {
@@ -308,6 +310,7 @@ skip_specs=0
 as_json=0
 no_probe=0
 dry_run=0
+full=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -322,6 +325,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --dry-run)
       dry_run=1
+      ;;
+    --full)
+      full=1
       ;;
     -*)
       usage
@@ -392,7 +398,7 @@ case "$command_name" in
     ;;
   render)
     [ -n "$change" ] || { usage; fail "render 需要 <change>"; }
-    render_verification "$change"
+    if [ "$full" = "1" ]; then render_verification "$change" --full; else render_verification "$change"; fi
     ;;
   sync-candidates)
     [ -z "$change" ] || { usage; fail "sync-candidates 不接受 change 参数"; }

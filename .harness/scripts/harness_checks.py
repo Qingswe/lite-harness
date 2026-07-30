@@ -598,6 +598,17 @@ def change_readiness(change, run_strict=True):
 
 OWNER_LABEL = {"human": "人", "ai": "AI", "external": "外部"}
 
+# 归因优先级：人 > 外部 > AI。
+# 一个 change 同时有未作答的人工步骤和未完成的 task 时，真正挡住它的是人——
+# 剩下的 task 往往正依赖那个人工结论。按 blocker 的追加顺序取第一条会报成
+# 「tasks 还有 N 项未完成」，把等人说成等 AI，人扫 ready 时就会漏掉自己那条。
+OWNER_RANK = {"human": 0, "external": 1, "ai": 2}
+
+
+def frontmost_blocker(blockers):
+    """取最靠前的那一个阻塞项：先按责任方，再按原顺序。"""
+    return min(blockers, key=lambda b: OWNER_RANK.get(b.get("owner"), 3))
+
 
 def build_ready_report(run_strict=True):
     harness_state.configure_root(ROOT)
@@ -614,7 +625,7 @@ def build_ready_report(run_strict=True):
             ready.append({"change": change["id"],
                           "depends_on": change["recovery"].get("depends_on") or []})
         else:
-            first = result["blockers"][0]
+            first = frontmost_blocker(result["blockers"])
             blocked.append({
                 "change": change["id"],
                 "criterion": first["criterion"],

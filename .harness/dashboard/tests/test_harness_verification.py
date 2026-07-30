@@ -30,9 +30,18 @@ PROGRAM_LOW = """# Program — alpha
 | --- | --- | --- |
 | `R1` | 回归基线不退化 | 全部测试通过 |
 
+## 必须验证
+
+- 单元测试：跑 harness 回归套件。
+
 ## 不验证及理由
 
 - EditMode：不执行，本 change 不触及 UnityProject/。
+
+## 可观测性与回滚
+
+- 日志：脚本 stderr。
+- 回滚方式：git revert。
 """
 
 
@@ -267,7 +276,9 @@ class ProgramContractTests(VerificationTestCase):
     def test_rules_parsed_from_bullets(self):
         program = ("# Program\n\n## 风险等级\n\n- 等级：`low`\n\n"
                    "## 评估规则\n\n- `R1` 回归基线不退化\n\n"
-                   "## 不验证及理由\n\n- EditMode：不执行，不触及 Unity。\n")
+                   "## 必须验证\n\n- 单元测试：回归套件。\n\n"
+                   "## 不验证及理由\n\n- EditMode：不执行，不触及 Unity。\n\n"
+                   "## 可观测性与回滚\n\n- 日志：stderr。\n- 回滚方式：git revert。\n")
         cid = self.write(record(), program=program)
         self.assertEqual(hv.lint(cid), [])
 

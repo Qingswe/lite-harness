@@ -45,9 +45,18 @@ PROGRAM = """# Program — alpha
 | --- | --- | --- |
 | `R1` | 回归基线不退化 | 见步骤 |
 
+## 必须验证
+
+- 单元测试：跑 harness 回归套件。
+
 ## 不验证及理由
 
 - EditMode：不执行，本 change 不触及 Unity 工程。
+
+## 可观测性与回滚
+
+- 日志：脚本 stderr。
+- 回滚方式：git revert。
 """
 
 
@@ -227,6 +236,29 @@ class ReadyEnumerationTests(LoopTestCase):
         seen = {i["change"] for i in report["ready"]} | \
                {i["change"] for i in report["blocked"]}
         self.assertIn("orphan", seen)
+
+
+class BlockerAttributionTests(LoopTestCase):
+    def test_human_blocker_outranks_pending_tasks(self):
+        """有未作答人工步骤时，ready 必须报「等人」而不是「等 AI 做完 task」。
+
+        剩下的 task 往往正依赖那个人工结论；报成 [AI] 会让人扫 ready 时漏掉
+        自己那一条，这正是 V14 实测判失败的原因。
+        """
+        human = step(id="H1", role="human", how=None,
+                     observe="打开 docs/quality/scorecard.md 的战斗评分行",
+                     needs_human_because="需要产品判断")
+        self.make_change(steps=[self.passed_step(), human], done=0, total=3)
+        report = harness_checks.build_ready_report(run_strict=False)
+        entry = next(i for i in report["blocked"] if i["change"] == "alpha")
+        self.assertEqual("human", entry["owner"])
+        self.assertIn("H1", entry["next_action"])
+
+    def test_ai_blocker_used_when_no_human_pending(self):
+        self.make_change(steps=[self.passed_step()], done=0, total=3)
+        report = harness_checks.build_ready_report(run_strict=False)
+        entry = next(i for i in report["blocked"] if i["change"] == "alpha")
+        self.assertEqual("ai", entry["owner"])
 
 
 class PrescreenTests(LoopTestCase):

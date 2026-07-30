@@ -52,7 +52,9 @@ class HarnessStateTests(unittest.TestCase):
                 "# Program\n\n## 风险等级\n\n- 等级：`low`\n\n## 评估规则\n\n"
                 "| id | 规则 | 通过依据 |\n| --- | --- | --- |\n"
                 "| `R1` | 人工确认 | 见步骤 |\n\n## 不验证及理由\n\n"
-                "- EditMode：不执行，此为夹具。\n", encoding="utf-8")
+                "- EditMode：不执行，此为夹具。\n\n"
+                "## 必须验证\n\n- 夹具：无实际验证。\n\n"
+                "## 可观测性与回滚\n\n- 日志：无。\n- 回滚方式：无。\n", encoding="utf-8")
             steps = []
             for index, status in enumerate(checks):
                 steps.append({

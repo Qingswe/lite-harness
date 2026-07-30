@@ -269,7 +269,7 @@ def build_steps(verification_text, checks_text):
             "rule": "R1",
             "how": command,
             "pass_when": "%s：原记录只保存了结果未声明通过标准。原结果：%s"
-                         % (TODO, result[:120] or "（空）"),
+                         % (TODO, result or "（空）"),
             "fail_when": "%s：原记录未声明失败标准，请补充最可能出现的错法。"
                          % TODO,
             "status": status,
@@ -295,8 +295,8 @@ def build_steps(verification_text, checks_text):
             "role": "human",
             "tasks": [],
             "rule": "R2",
-            "observe": "%s：原检查项未声明观察对象。原文：%s" % (TODO, item[:160]),
-            "pass_when": "%s：原检查项未声明通过标准。原文：%s" % (TODO, item[:160]),
+            "observe": "%s：原检查项未声明观察对象。原文：%s" % (TODO, item),
+            "pass_when": "%s：原检查项未声明通过标准。原文：%s" % (TODO, item),
             "fail_when": "%s：原检查项未声明失败标准，请补充最可能出现的错法。"
                          % TODO,
             "needs_human_because": "%s：原记录未声明为何需要人。" % TODO,
@@ -360,6 +360,35 @@ def build_quality_docs(verification_text):
     return triggered
 
 
+# 这些小节没有对应的结构化字段，但它们承载真实内容。原样保留，
+# 否则迁移就不是无损的——丢一整节比截断一个字段更严重。
+CARRIED_SECTIONS = (
+    ("verification.md", "人工豁免"),
+    ("verification.md", "最终结论"),
+    ("human-checks.md", "失败记录"),
+    ("human-checks.md", "豁免记录"),
+)
+
+
+def carried_sections(verification_text, checks_text):
+    """把没有结构化归宿的小节原文带过来。"""
+    out = []
+    source = {"verification.md": verification_text, "human-checks.md": checks_text}
+    for filename, heading in CARRIED_SECTIONS:
+        body = [l.rstrip() for l in hv.section_lines(source[filename], heading)]
+        while body and not body[0].strip():
+            body.pop(0)
+        while body and not body[-1].strip():
+            body.pop()
+        content = [l for l in body if l.strip()
+                   and l.strip().lstrip("-`").strip() not in ("", "无", "无。")]
+        if not content:
+            continue
+        out.append({"source": filename, "heading": heading,
+                    "text": "\n".join(body)})
+    return out
+
+
 def parse_conclusion(verification_text):
     for line in hv.section_lines(verification_text, "最终结论"):
         stripped = line.strip().lstrip("-").strip().strip("`")
@@ -412,6 +441,7 @@ def build_verification(change_id, verification_text, checks_text, steps):
             "prescreen_run": None,
             "triggered": build_quality_docs(verification_text),
         },
+        "migrated_sections": carried_sections(verification_text, checks_text),
         "conclusion": {
             "status": parse_conclusion(verification_text),
             "note": "%s：迁移自旧记录，关闭前需按新判据复核。" % TODO,

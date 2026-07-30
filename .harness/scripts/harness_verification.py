@@ -47,7 +47,10 @@ REQUIRED_BY_ROLE = {
 }
 
 # program.md 按风险等级要求的小节。
-SECTIONS_LOW = ("风险等级", "评估规则", "不验证及理由")
+#「必须验证」与「不验证及理由」成对：只留否定的一半，读者无从判断覆盖面。
+#「可观测性与回滚」与风险等级无关——出问题时去哪看、怎么退回，低风险一样要答。
+SECTIONS_LOW = ("风险等级", "必须验证", "不验证及理由", "可观测性与回滚",
+                "评估规则")
 SECTIONS_HIGH = SECTIONS_LOW + ("约束", "停止条件")
 
 # 整节内容都是这些说法时，视为占位填写而非真实内容。
@@ -791,8 +794,12 @@ def commit_step_record(change_id, step_id, status):
 # 渲染
 # --------------------------------------------------------------------------
 
-def render_markdown(change_id):
+def render_markdown(change_id, full=False):
     """把 verification.json 渲染成 markdown 供人阅读。
+
+    默认是**紧凑视图**：只给总览表、未完成/失败的步骤，以及全部人工步骤的判定
+    契约——那是人真正要读来做决定的部分。已通过的自动步骤只在表里占一行。
+    `full=True` 展开全部判定契约与迁移带入的原文。
 
     渲染结果 MUST NOT 被任何校验回读——事实来源只有 verification.json。
     """
@@ -828,8 +835,21 @@ def render_markdown(change_id):
             "、".join("`%s`" % e for e in evidence) or "—",
         ))
 
+    # 需要人读判定契约的只有两类：等他作答的人工步骤，和没通过的步骤。
+    def needs_detail(step):
+        if full:
+            return True
+        if str(step.get("role") or "").lower() == "human":
+            return True
+        return str(step.get("status") or "").lower() not in TERMINAL_STATUSES
+
+    detailed = [s for s in data["steps"] if needs_detail(s)]
+    hidden = len(data["steps"]) - len(detailed)
     out.extend(["", "## 判定契约", ""])
-    for step in data["steps"]:
+    if not full and hidden:
+        out.append("> 已折叠 %d 个已通过的自动步骤；`--full` 展开全部。" % hidden)
+        out.append("")
+    for step in detailed:
         out.append("### %s（%s）" % (step.get("id"), step.get("role")))
         out.append("")
         if step.get("how"):
@@ -858,6 +878,19 @@ def render_markdown(change_id):
     else:
         out.append("- 无触发条目（沉默即未触发）。")
 
+    carried = data.get("migrated_sections") or []
+    if carried and not full:
+        out.extend(["", "## 迁移带入的原文", "",
+                    "> %d 个小节原样带自旧格式；`--full` 展开。"
+                    % len(carried)])
+    elif carried:
+        out.extend(["", "## 迁移带入的原文", "",
+                    "> 以下小节在旧格式里没有结构化归宿，原样带过来，未作改写。"])
+        for item in carried:
+            out.extend(["", "### %s（原 %s）" % (item.get("heading"),
+                                                item.get("source")), "",
+                        item.get("text") or ""])
+
     conclusion = data.get("conclusion") or {}
     out.extend(["", "## 最终结论", "",
                 "- `%s`" % (conclusion.get("status") or "pending")])
@@ -875,7 +908,7 @@ USAGE = """用法:
   harness_verification.py lint <change> [--root <path>]
   harness_verification.py counts <change> [--root <path>]
   harness_verification.py ready <change> [--root <path>]
-  harness_verification.py render <change> [--root <path>]
+  harness_verification.py render <change> [--full] [--root <path>]
   harness_verification.py set <change> <step> <status> [--by <operator>]
         [--date <YYYY-MM-DD>] [--note <text>] [--evidence <path>]...
         [--agent <name>] [--model <name>] [--expect <status>] [--commit]
@@ -907,6 +940,8 @@ def main(argv):
                 return 2
         elif arg.startswith("--root="):
             root = arg.split("=", 1)[1]
+        elif arg == "--full":
+            options["full"] = True
         elif arg == "--commit":
             options["commit"] = True
         elif arg == "--evidence":
@@ -969,7 +1004,8 @@ def main(argv):
 
     if command == "render":
         try:
-            sys.stdout.write(render_markdown(change_id))
+            sys.stdout.write(render_markdown(change_id,
+                                             full=bool(options.get("full"))))
         except VerificationFormatError as exc:
             sys.stderr.write("错误: %s\n" % exc)
             return 1
