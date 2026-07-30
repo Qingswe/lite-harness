@@ -20,6 +20,11 @@ from datetime import date
 
 # 仓库根默认 = 本模块所在 .harness/scripts 的上两级目录，可用 configure_root() 覆盖。
 _SELF_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SELF_DIR not in sys.path:
+    sys.path.insert(0, _SELF_DIR)
+
+import harness_verification as hv  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(_SELF_DIR))
 
 # 这些随 ROOT 变化，由 configure_root() 设置。
@@ -46,6 +51,8 @@ def configure_root(root):
     DOC_ALLOW = tuple(os.path.normpath(p) for p in (
         CHANGES_DIR, CHECKPOINTS_DIR, EVIDENCE_DIR, DOCS_DIR, FEATURE_INDEX,
     ))
+    # 验证记录的解析器必须跟着换根，否则两处会各看一个仓库。
+    hv.configure_root(ROOT)
 
 
 # 导入即以默认仓库根引导；调用方可再用 configure_root() 覆盖。
@@ -106,6 +113,7 @@ CONTEXT_FIELDS = (
     "depends_on",
     "last_checkpoint",
     "last_updated",
+    "generated_by",
 )
 
 # summary 只说明"为什么它还没进 active"；细节属于 proposal.md / design.md。
@@ -189,29 +197,37 @@ def parse_tasks(path):
     return items
 
 
-def parse_human_checks(path):
-    text, _ = read_text(path)
-    lines = split_lines(text)
-    rows = []
-    header_idx = None
-    for idx, line in enumerate(lines):
-        if "状态" in line and "检查项" in line and line.strip().startswith("|"):
-            header_idx = idx
-            break
-    if header_idx is None:
-        return rows
-    for idx in range(header_idx + 2, len(lines)):
-        line = lines[idx]
-        if not line.strip().startswith("|"):
-            break
-        cells = parse_table_row(line)
-        if len(cells) < 5:
-            continue
-        rows.append({
-            "line": idx, "status": cells[0], "item": cells[1],
-            "operator": cells[2], "date": cells[3], "notes": cells[4], "raw": line,
+def parse_verification_steps(change_id):
+    """读该 change 的验证步骤。解析委派 harness_verification，本文件不自带实现。
+
+    返回 (steps, error)。error 非空表示记录无法解析——调用方 MUST 把它当作问题
+    上报，MUST NOT 退化成"解析不到步骤所以没有未完成项"。
+    """
+    hv.configure_root(ROOT)
+    try:
+        data = hv.load_verification(change_id)
+    except hv.VerificationFormatError as exc:
+        return [], str(exc)
+
+    steps = []
+    for step in data["steps"]:
+        steps.append({
+            "id": step.get("id"),
+            "role": str(step.get("role") or "").lower(),
+            "status": str(step.get("status") or "").lower(),
+            "rule": step.get("rule"),
+            "tasks": step.get("tasks") or [],
+            "item": step.get("pass_when") or "",
+            "fail_when": step.get("fail_when"),
+            "needs_human_because": step.get("needs_human_because"),
+            "observe": step.get("observe"),
+            "migrated": bool(step.get("migrated")),
+            "operator": step.get("operator"),
+            "date": step.get("date"),
+            "notes": step.get("note"),
+            "evidence": step.get("evidence") or [],
         })
-    return rows
+    return steps, None
 
 
 def parse_table_row(line):
@@ -221,10 +237,6 @@ def parse_table_row(line):
     if parts and parts[-1].strip() == "":
         parts = parts[:-1]
     return [p.strip() for p in parts]
-
-
-def build_table_row(status, item, operator, date, notes):
-    return "| {} | {} | {} | {} | {} |".format(status, item, operator, date, notes)
 
 
 # --------------------------------------------------------------------------
@@ -263,7 +275,9 @@ CHANGE_MARKERS = (
     ".openspec.yaml",
     "proposal.md",
     "tasks.md",
-    "quality-contract.md",
+    "program.md",
+    "verification.json",
+    "quality-contract.md",  # 迁移前形态，保留以便旧 change 仍可被发现并报错。
 )
 
 
@@ -373,45 +387,95 @@ def normalize_current_state(current, valid_change_ids):
     }
 
 
+# 只有这两个取值是"可归档"主张。其余 phase 描述的是进度或闸门，不构成主张，
+# 人工写什么就采信什么——`planned` 与 `awaiting_human` 之间没有严格/宽松之分，
+# 只有早晚之分，硬给它们排一个全序会把人工意图无谓地覆盖掉。
+CLOSABLE_PHASES = ("ready_to_close", "complete")
+
+
+def compute_readiness(change):
+    """归档就绪度中由本模块拥有的判据。
+
+    完整的七项判据还包括 strict 校验、质量文档预筛与角色隔离，它们由
+    harness_checks 提供，在 harness 命令层合并。这里只算不需要外部进程的部分，
+    并且**全部由计算得出**：人工写入的 phase 不参与。
+    """
+    blockers = []
+    progress = change["task_progress"]
+    tasks_done = progress["total"] > 0 and progress["done"] == progress["total"]
+    if not tasks_done:
+        blockers.append({
+            "criterion": "tasks",
+            "detail": "tasks.md 还有 %d 项未完成"
+                      % (progress["total"] - progress["done"]),
+            "owner": "ai",
+        })
+
+    if change.get("verification_error"):
+        blockers.append({"criterion": "verification-record",
+                         "detail": change["verification_error"],
+                         "owner": "ai"})
+        return {"ready": False, "blockers": blockers}
+
+    hv.configure_root(ROOT)
+    result = hv.verification_readiness(change["id"])
+    blockers.extend(result["blockers"])
+    return {"ready": not blockers, "blockers": blockers}
+
+
 def derive_lifecycle(change, context, is_active):
-    """Project lifecycle without copying task/check outcomes into current.json."""
+    """Project lifecycle from computed readiness, not from declared phase."""
     context = context if isinstance(context, dict) else {}
     explicit = context.get("phase")
     warnings = []
     progress = change["task_progress"]
     counts = change["check_counts"]
+    human_counts = change.get("human_counts") or {}
     tasks_done = progress["total"] > 0 and progress["done"] == progress["total"]
     pending = counts.get("pending", 0)
     failed = counts.get("failed", 0)
+    human_pending = human_counts.get("pending", 0) + human_counts.get("failed", 0)
 
-    if explicit in LIFECYCLE_PHASES:
-        phase = explicit
-        source = "explicit"
+    readiness = compute_readiness(change)
+
+    if is_active:
+        derived = "implementing"
+    elif failed:
+        derived = "blocked"
+    elif readiness["ready"]:
+        derived = "ready_to_close"
+    elif human_pending and tasks_done:
+        derived = "awaiting_human"
+    elif tasks_done:
+        derived = "auto_verified"
     else:
-        if explicit:
-            warnings.append("Unknown explicit lifecycle phase %r; using derived phase." % explicit)
-        source = "derived"
-        if is_active:
-            phase = "implementing"
-        elif failed:
-            phase = "blocked"
-        elif tasks_done and pending:
-            phase = "awaiting_human"
-        elif tasks_done and change["has_checks"]:
-            phase = "ready_to_close"
-        elif tasks_done:
-            phase = "complete"
-        else:
-            phase = "planned"
+        derived = "planned"
 
+    phase = derived
+    source = "derived"
+    if explicit in LIFECYCLE_PHASES:
+        if explicit in CLOSABLE_PHASES and not readiness["ready"]:
+            # 人工声称可归档但计算判定未就绪：采信计算结果，并报告导致未就绪的
+            # 具体判据。这是「只能收紧不能放宽」唯一真正生效的地方。
+            reasons = "；".join(b["detail"] for b in readiness["blockers"][:3])
+            warnings.append(
+                "explicit phase %r claims closable but computed readiness is "
+                "false; using computed %r. 阻塞判据：%s"
+                % (explicit, derived, reasons or "无"))
+        else:
+            phase = explicit
+            source = "explicit"
+    elif explicit:
+        warnings.append("Unknown explicit lifecycle phase %r; using derived phase." % explicit)
+
+    if phase == "ready_to_close" and not readiness["ready"]:
+        warnings.append("ready_to_close contradicts computed readiness.")
     if phase in ("ready_to_close", "complete") and (pending or failed):
-        warnings.append("%s contradicts pending/failed human checks." % phase)
+        warnings.append("%s contradicts pending/failed verification steps." % phase)
     if phase == "complete" and not tasks_done:
         warnings.append("complete contradicts incomplete tasks.")
-    if phase == "ready_to_close" and not tasks_done:
-        warnings.append("ready_to_close contradicts incomplete tasks.")
-    if phase in ("awaiting_human", "awaiting_human_and_user_direction") and not (pending or failed):
-        warnings.append("%s has no pending/failed human checks." % phase)
+    if phase in ("awaiting_human", "awaiting_human_and_user_direction") and not human_pending:
+        warnings.append("%s has no pending/failed human steps." % phase)
     if phase == "implementing" and not is_active:
         warnings.append("implementing change does not own the active slot.")
 
@@ -533,11 +597,11 @@ def list_evidence(change_id):
 def build_change(name):
     change_dir = os.path.join(CHANGES_DIR, name)
     tasks_path = os.path.join(change_dir, "tasks.md")
-    checks_path = os.path.join(change_dir, "human-checks.md")
-    verif_path = os.path.join(change_dir, "verification.md")
+    verif_path = os.path.join(change_dir, "verification.json")
+    program_path = os.path.join(change_dir, "program.md")
 
     tasks = parse_tasks(tasks_path) if os.path.isfile(tasks_path) else None
-    checks = parse_human_checks(checks_path) if os.path.isfile(checks_path) else None
+    steps, verif_error = parse_verification_steps(name)
 
     done = total = 0
     if tasks is not None:
@@ -546,22 +610,38 @@ def build_change(name):
         done = sum(1 for t in ti if t["checked"])
 
     check_counts = {s: 0 for s in HUMAN_STATUSES}
-    if checks:
-        for r in checks:
-            if r["status"] in check_counts:
-                check_counts[r["status"]] += 1
+    for step in steps:
+        if step["status"] in check_counts:
+            check_counts[step["status"]] += 1
+
+    # 格式门槛在这里就跑（纯 Python，不起子进程），让 status 能提前提示，而不是
+    # 等到 close 那一刻才暴露。完整门槛（strict、git、角色隔离）仍在 harness lint。
+    lint_problems = [] if verif_error else hv.lint(name)
+
+    human_steps = [s for s in steps if s["role"] == "human"]
+    human_counts = {s: 0 for s in HUMAN_STATUSES}
+    for step in human_steps:
+        if step["status"] in human_counts:
+            human_counts[step["status"]] += 1
 
     return {
         "id": name,
         "title": first_heading(os.path.join(change_dir, "proposal.md")) or name,
         "has_tasks": tasks is not None,
-        "has_checks": checks is not None,
+        # 记录无法解析时 has_checks 仍为 True：否则"解析不到步骤"会被当成
+        # "没有未完成项"，那正是本轮要消灭的失效。
+        "has_checks": bool(steps) or verif_error is not None,
         "tasks": tasks,
-        "human_checks": checks,
+        "steps": steps,
+        "human_steps": human_steps,
         "check_counts": check_counts,
+        "human_counts": human_counts,
+        "verification_error": verif_error,
+        "lint_problems": lint_problems,
         "task_progress": {"done": done, "total": total},
         "checkpoints": list_checkpoints(name),
         "verification": rel(verif_path) if os.path.isfile(verif_path) else None,
+        "program": rel(program_path) if os.path.isfile(program_path) else None,
         "evidence": list_evidence(name),
         "has_proposal": os.path.isfile(os.path.join(change_dir, "proposal.md")),
         "has_design": os.path.isfile(os.path.join(change_dir, "design.md")),
@@ -749,23 +829,24 @@ def toggle_task(change_id, line_no, checked, expected):
     return True, lines[line_no]
 
 
-def update_human_check(change_id, line_no, status, operator, date, notes, expected):
-    if status not in HUMAN_STATUSES:
-        raise ValueError("非法状态")
-    path = safe_change_path(change_id, "human-checks.md")
-    text, newline = read_text(path)
-    lines = split_lines(text)
-    if line_no < 0 or line_no >= len(lines):
-        raise IndexError("行号越界")
-    if expected is not None and lines[line_no] != expected:
-        return False, lines[line_no]
-    cells = parse_table_row(lines[line_no])
-    if len(cells) < 5:
-        raise ValueError("目标行不是合法的人工检查表格行")
-    item = cells[1]
-    lines[line_no] = build_table_row(status, item, operator, date, notes)
-    write_lines(path, lines, newline)
-    return True, lines[line_no]
+def update_verification_step(change_id, step_id, status, operator, date_value,
+                             notes, expected, evidence=None):
+    """按 step id 寻址写入验证结论。
+
+    id 寻址取代了旧的"行号 + 原始整行比对"乐观锁：行号会随文档编辑漂移，而
+    id 天然稳定，冲突检测改为比较状态本身。
+    """
+    require_change_exists(change_id)
+    hv.configure_root(ROOT)
+    try:
+        hv.set_step(change_id, step_id, status, operator=operator,
+                    date_value=date_value, note=notes, evidence=evidence,
+                    expected_status=expected)
+    except hv.StepConflict:
+        data = hv.load_verification(change_id)
+        step = hv.find_step(data, step_id)
+        return False, (step or {}).get("status")
+    return True, status
 
 
 def read_doc(relpath):
@@ -979,13 +1060,19 @@ def build_status(commit_count=5):
                          changes)
 
     def entry(c):
+        human = c.get("human_counts") or {}
         return {
             "id": c["id"],
             "phase": c["lifecycle_phase"],
             "phase_source": c["phase_source"],
             "tasks": "%d/%d" % (c["task_progress"]["done"], c["task_progress"]["total"]),
-            "pending_checks": c["check_counts"].get("pending", 0),
-            "failed_checks": c["check_counts"].get("failed", 0),
+            "pending_steps": c["check_counts"].get("pending", 0),
+            "failed_steps": c["check_counts"].get("failed", 0),
+            "pending_checks": human.get("pending", 0),
+            "failed_checks": human.get("failed", 0),
+            "verification_error": c.get("verification_error"),
+            "lint_problems": len(c.get("lint_problems") or []),
+            "lint_first": (c.get("lint_problems") or [None])[0],
             "blockers": c["recovery"]["blockers"],
             "next_action": c["recovery"]["next_action"],
             "summary": c["summary"],
@@ -1047,6 +1134,16 @@ def format_status(status):
     add("候选 change (%d):" % len(status["candidates"]))
     for c in status["candidates"]:
         flags = []
+        # 记录无法解析时必须显式说出来：把它显示成"没有未完成项"正是本轮要
+        # 消灭的失效（一个 224 字节的散文文档曾一直显示为零 pending）。
+        if c.get("verification_error"):
+            flags.append("验证记录不可解析")
+        if c.get("lint_problems"):
+            flags.append("门槛 %d 项待修" % c["lint_problems"])
+        if c["pending_steps"]:
+            flags.append("step %d pending" % c["pending_steps"])
+        if c["failed_steps"]:
+            flags.append("step %d failed" % c["failed_steps"])
         if c["pending_checks"]:
             flags.append("human %d pending" % c["pending_checks"])
         if c["failed_checks"]:

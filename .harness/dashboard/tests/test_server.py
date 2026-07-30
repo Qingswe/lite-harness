@@ -46,16 +46,37 @@ class HarnessStateTests(unittest.TestCase):
             tasks.append("- [%s] task %d" % ("x" if index < done else " ", index + 1))
         (change / "tasks.md").write_text("\n".join(tasks) + "\n", encoding="utf-8")
         if checks is not None:
-            rows = [
-                "# Human Checks",
-                "",
-                "| 状态 | 检查项 | 操作者 | 日期 | 证据或备注 |",
-                "| --- | --- | --- | --- | --- |",
-            ]
+            # 人工检查已并入 verification.json 的 role: human 步骤；
+            # checks 里的每个状态生成一个人工步骤。
+            (change / "program.md").write_text(
+                "# Program\n\n## 风险等级\n\n- 等级：`low`\n\n## 评估规则\n\n"
+                "| id | 规则 | 通过依据 |\n| --- | --- | --- |\n"
+                "| `R1` | 人工确认 | 见步骤 |\n\n## 不验证及理由\n\n"
+                "- EditMode：不执行，此为夹具。\n", encoding="utf-8")
+            steps = []
             for index, status in enumerate(checks):
-                rows.append("| %s | check %d |  |  |  |" % (status, index + 1))
-            (change / "human-checks.md").write_text(
-                "\n".join(rows) + "\n", encoding="utf-8")
+                steps.append({
+                    "id": "H%d" % (index + 1), "role": "human", "tasks": [],
+                    "rule": "R1",
+                    "observe": "夹具检查项 %d 的观察对象" % (index + 1),
+                    "pass_when": "夹具检查项 %d 的通过标准" % (index + 1),
+                    "fail_when": "夹具检查项 %d 出现具体的错误表现" % (index + 1),
+                    "needs_human_because": "夹具：需要人工确认",
+                    "status": status, "operator": None, "date": None,
+                    "evaluated_by": None, "evidence": [], "note": None,
+                    "migrated": True,
+                })
+            record = {
+                "schema_version": 1, "change": change_id,
+                "baseline_commit": None,
+                "environment": {"os": None, "unity": None, "date": None},
+                "steps": steps, "uncovered": [],
+                "quality_docs": {"prescreen_run": None, "triggered": []},
+                "conclusion": {"status": "pending", "note": None},
+            }
+            (change / "verification.json").write_text(
+                json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8")
 
     def write_current(self, state):
         (self.root / ".harness" / "current.json").write_text(
