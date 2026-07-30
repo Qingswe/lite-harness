@@ -759,6 +759,34 @@ def set_step(change_id, step_id, status, operator=None, date_value=None,
     return step
 
 
+def commit_step_record(change_id, step_id, status):
+    """把验证记录单独提交。
+
+    角色隔离断言要求评估结论不与实现改动同处一个提交。靠人记得分开提交是不
+    够的——实测两次都是 `git add -A` 把记录扫进了实现提交。这里只 stage 这一
+    个文件，从构造上保证分离。
+    """
+    import subprocess
+    rel_path = rel(verification_path(change_id))
+    try:
+        add = subprocess.run(["git", "add", rel_path], cwd=ROOT,
+                             capture_output=True, text=True, timeout=20)
+        if add.returncode != 0:
+            return False, (add.stderr or "").strip()
+        staged = subprocess.run(["git", "diff", "--cached", "--quiet", "--",
+                                 rel_path], cwd=ROOT, timeout=20)
+        if staged.returncode == 0:
+            return False, "记录无变化，未提交"
+        message = "Evaluator: %s %s -> %s" % (change_id, step_id, status)
+        out = subprocess.run(["git", "commit", "-q", "-m", message, "--", rel_path],
+                             cwd=ROOT, capture_output=True, text=True, timeout=30)
+        if out.returncode != 0:
+            return False, (out.stderr or out.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    return True, message
+
+
 # --------------------------------------------------------------------------
 # 渲染
 # --------------------------------------------------------------------------
@@ -850,7 +878,8 @@ USAGE = """用法:
   harness_verification.py render <change> [--root <path>]
   harness_verification.py set <change> <step> <status> [--by <operator>]
         [--date <YYYY-MM-DD>] [--note <text>] [--evidence <path>]...
-        [--agent <name>] [--model <name>] [--expect <status>] [--root <path>]
+        [--agent <name>] [--model <name>] [--expect <status>] [--commit]
+        [--root <path>]
 """
 
 COMMANDS = ("lint", "counts", "render", "ready", "set")
@@ -878,6 +907,8 @@ def main(argv):
                 return 2
         elif arg.startswith("--root="):
             root = arg.split("=", 1)[1]
+        elif arg == "--commit":
+            options["commit"] = True
         elif arg == "--evidence":
             if not args:
                 sys.stderr.write(USAGE)
@@ -960,6 +991,9 @@ def main(argv):
         sys.stderr.write("错误: %s\n" % exc)
         return 1
     print("==> %s 的步骤 %s 已置为 %s" % (change_id, step_id, step["status"]))
+    if options.get("commit"):
+        ok, detail = commit_step_record(change_id, step_id, step["status"])
+        print("==> %s%s" % ("已单独提交验证记录: " if ok else "未提交: ", detail))
     return 0
 
 

@@ -16,7 +16,7 @@ usage() {
   .harness/scripts/harness rollback <change>
   .harness/scripts/harness lint <change>
   .harness/scripts/harness check <change> <step> <status> [--by <人>]
-                                 [--note <说明>] [--evidence <路径>]
+                                 [--note <说明>] [--evidence <路径>] [--commit]
   .harness/scripts/harness render <change>
   .harness/scripts/harness sync-candidates
   .harness/scripts/harness verify <change> [--no-probe]
@@ -34,7 +34,8 @@ usage() {
   rollback 把仓库退回某次归档之前。close 会把归档结果提交，因此 reset 到
          回滚点即可完整还原；残留未跟踪文件会被报错而不是当作成功。
   lint   运行与 close 完全相同的门槛断言但不归档，任何时刻可跑。
-  check  按 step id 写入验证结论，格式由命令保证。
+  check  按 step id 写入验证结论，格式由命令保证。加 --commit 时把验证记录
+         单独提交，从构造上保证它不与实现改动同处一个提交。
   render 把 verification.json 渲染成 markdown 供人阅读（事实来源仍是 JSON）。
   sync-candidates 按 openspec/changes/ 的实际内容重写候选集合；候选成员关系
          不由人工维护，per-change context 原样保留。
