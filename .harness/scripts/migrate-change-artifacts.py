@@ -135,6 +135,23 @@ def classify_result(result):
     return "pending"
 
 
+TASK_ID_RE = re.compile(r"^\d+(\.\d+)*([~-]\d+(\.\d+)*)?$")
+
+
+def task_ids(cell):
+    """从旧「对应任务」列取任务号。
+
+    该列常混着散文（"Visibility 判定"、"地图生成"）。按分隔符切完就全塞进
+    tasks，会让字段指向不存在的任务；只保留看起来像任务号的片段。
+    """
+    out = []
+    for token in re.split(r"[、,，/\s]+", cell or ""):
+        token = token.strip().rstrip("\\").strip()
+        if token and TASK_ID_RE.match(token):
+            out.append(token)
+    return out
+
+
 def parse_risk(text):
     for line in hv.section_lines(text, "风险等级"):
         stripped = line.strip()
@@ -248,8 +265,7 @@ def build_steps(verification_text, checks_text):
         step = {
             "id": "V%d" % counter,
             "role": "evaluator",
-            "tasks": [t.strip() for t in re.split(r"[、,，/]", tasks_cell)
-                      if t.strip()],
+            "tasks": task_ids(tasks_cell),
             "rule": "R1",
             "how": command,
             "pass_when": "%s：原记录只保存了结果未声明通过标准。原结果：%s"
