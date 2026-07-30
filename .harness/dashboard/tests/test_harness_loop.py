@@ -212,6 +212,23 @@ class PhaseTighteningTests(LoopTestCase):
         self.assertEqual("explicit", source)
 
 
+class ReadyEnumerationTests(LoopTestCase):
+    def test_change_absent_from_candidates_is_still_enumerated(self):
+        """磁盘上存在但未登记为候选的 change 不能对 ready 隐身。
+
+        否则一个真正就绪的 change 会永远触发不到自动归档，而且没有任何提示。
+        """
+        self.make_change("orphan", steps=[self.passed_step()])
+        (self.root / ".harness" / "current.json").write_text(
+            json.dumps({"schema_version": 2, "active_change": None,
+                        "candidate_changes": [], "change_context": {}}),
+            encoding="utf-8")
+        report = harness_checks.build_ready_report(run_strict=False)
+        seen = {i["change"] for i in report["ready"]} | \
+               {i["change"] for i in report["blocked"]}
+        self.assertIn("orphan", seen)
+
+
 class PrescreenTests(LoopTestCase):
     def setUp(self):
         super().setUp()
@@ -268,6 +285,76 @@ class DashboardStepWriteTests(LoopTestCase):
         self.assertFalse(ok)
         self.assertEqual("pending", current)
 
+    def test_no_consumer_parses_the_record_itself(self):
+        """消费方不得把验证记录的**原文**自己解析一遍。
+
+        Evaluator 实测到过这一条：`_statuses_at` 曾自己 json.loads 一个 git blob
+        再摸 id/status，绕过唯一解析器，而当时的模块身份断言完全没看见它。
+        索引 `load_verification()` 的返回值是消费解析结果，不在此列；把文本变成
+        步骤的地方必须只有 harness_verification 一处。
+        """
+        scripts = DASHBOARD_DIR.parent / "scripts"
+        for name in ("harness_checks.py", "harness_state.py"):
+            lines = (scripts / name).read_text(encoding="utf-8").split("\n")
+            for idx, line in enumerate(lines):
+                if "json.loads" not in line and "json.load(" not in line:
+                    continue
+                context = "\n".join(lines[max(0, idx - 4):idx + 2])
+                # 白名单：这几份 JSON 本来就归各自模块解析，与验证记录无关。
+                allowed = ("CURRENT_JSON", "current.json",
+                           "FEATURE_INDEX", "feature-index.json")
+                self.assertTrue(
+                    any(token in context for token in allowed),
+                    "%s:%d 把 JSON 原文解析成了别的东西；验证记录的解析只能在 "
+                    "harness_verification.parse_statuses" % (name, idx + 1))
+
+class RoleIsolationTests(LoopTestCase):
+    """角色隔离的机械强制。Evaluator 指出这块此前完全没有测试覆盖。"""
+
+    def test_same_identity_evaluation_is_rejected(self):
+        self.make_change(steps=[self.passed_step(
+            evaluated_by={"agent": "claude-code", "model": "claude-opus-5"})])
+        problems = harness_checks.check_role_isolation(
+            "alpha", {"agent": "claude-code", "model": "claude-opus-5"})
+        self.assertTrue(any("实现者不得评估自身产出" in p for p in problems),
+                        problems)
+
+    def test_same_model_different_agent_is_rejected(self):
+        self.make_change(steps=[self.passed_step(
+            evaluated_by={"agent": "other", "model": "claude-opus-5"})])
+        problems = harness_checks.check_role_isolation(
+            "alpha", {"agent": "claude-code", "model": "claude-opus-5"})
+        self.assertTrue(any("必须换模型" in p for p in problems), problems)
+
+    def test_distinct_identity_is_accepted(self):
+        self.make_change(steps=[self.passed_step()])
+        self.assertEqual([], harness_checks.check_role_isolation(
+            "alpha", {"agent": "claude-code", "model": "claude-opus-5"}))
+
+    def test_concluded_step_without_identity_is_rejected(self):
+        self.make_change(steps=[self.passed_step(evaluated_by=None)])
+        problems = harness_checks.check_role_isolation("alpha", {})
+        self.assertTrue(any("没有记录评估身份" in p for p in problems), problems)
+
+    def test_human_identity_is_exempt(self):
+        human = step(id="H1", role="human", how=None,
+                     observe="打开 docs/quality/scorecard.md 的战斗评分行",
+                     needs_human_because="需要产品判断",
+                     status="passed", operator="qingswe", date="2026-07-30",
+                     evaluated_by={"agent": "human", "model": "human"},
+                     evidence=[self.evidence()])
+        self.make_change(steps=[human])
+        self.assertEqual([], harness_checks.check_role_isolation(
+            "alpha", {"agent": "human", "model": "human"}))
+
+    def test_parse_statuses_is_the_single_entry_point(self):
+        blob = json.dumps({"steps": [{"id": "V1", "status": "PASSED"}]})
+        self.assertEqual({"V1": "passed"}, hv.parse_statuses(blob))
+        self.assertEqual({}, hv.parse_statuses("{not json"))
+        self.assertEqual({}, hv.parse_statuses(None))
+
+
+class DashboardStepWriteTests2(LoopTestCase):
     def test_server_ready_endpoint_shares_one_implementation(self):
         self.assertIs(server.harness_checks.build_ready_report,
                       harness_checks.build_ready_report)

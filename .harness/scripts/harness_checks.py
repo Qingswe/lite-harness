@@ -364,16 +364,12 @@ def _git(args):
 
 
 def _statuses_at(rev, relpath):
-    """取某个修订下 verification.json 的 {step id: status}。文件不存在时返回 {}。"""
-    blob = _git(["show", "%s:%s" % (rev, relpath)])
-    if blob is None:
-        return {}
-    try:
-        data = json.loads(blob)
-    except ValueError:
-        return {}
-    return {str(s.get("id")): str(s.get("status") or "").lower()
-            for s in data.get("steps", []) if isinstance(s, dict)}
+    """取某个修订下 verification.json 的 {step id: status}。
+
+    只负责把 blob 取来；解析委派 harness_verification.parse_statuses，本文件
+    不自带第二份实现。
+    """
+    return hv.parse_statuses(_git(["show", "%s:%s" % (rev, relpath)]))
 
 
 def _is_implementation_path(path, change_id):
@@ -396,9 +392,9 @@ def check_role_isolation(change_id, generator_identity=None):
     problems = []
     relpath = "openspec/changes/%s/verification.json" % change_id
 
-    log = _git(["log", "--format=%H", "--", relpath])
-    if log is None:
-        return []  # 不在 git 仓库或路径尚未提交：留给其他门槛处理。
+    # 提交级断言需要 git；身份校验不需要。拿不到 git 时只跳过前者，
+    # 不能连身份校验一起放弃——否则在任何非 git 上下文里这道闸门会静默消失。
+    log = _git(["log", "--format=%H", "--", relpath]) or ""
 
     for commit in [l.strip() for l in log.splitlines() if l.strip()]:
         before = _statuses_at(commit + "^", relpath)
@@ -601,7 +597,10 @@ OWNER_LABEL = {"human": "人", "ai": "AI", "external": "外部"}
 def build_ready_report(run_strict=True):
     harness_state.configure_root(ROOT)
     state = harness_state.build_state()
-    changes = [c for c in state["changes"] if c["is_candidate"] or c["is_active"]]
+    # 覆盖全部可发现的 change，不只是 current.json 里的候选：一个磁盘上真实存在
+    # 且已就绪的 change 若没被登记进候选，会对 ready 完全不可见，从而永远触发
+    # 不到自动归档。成员关系的漂移由 detect_drift 报告，不该在这里吞掉。
+    changes = list(state["changes"])
 
     ready, blocked = [], []
     for change in changes:
@@ -736,14 +735,14 @@ CHANGE_COMMANDS = ("gate", "verification", "roles", "probe-needed",
 
 
 def generator_identity(change_id):
-    """从 .harness/current.json 取本 change 的实现身份。"""
-    path = os.path.join(ROOT, ".harness", "current.json")
-    if not os.path.isfile(path):
-        return {}
-    try:
-        with open(path, "rb") as fh:
-            data = json.loads(fh.read().decode("utf-8"))
-    except (OSError, ValueError):
+    """从 .harness/current.json 取本 change 的实现身份。
+
+    走状态层的 load_current，不自己再读一遍：current.json 的解析与迁移语义
+    只在 harness_state 一处。
+    """
+    harness_state.configure_root(ROOT)
+    data = harness_state.load_current()
+    if not isinstance(data, dict) or data.get("_parse_error"):
         return {}
     context = (data.get("change_context") or {}).get(change_id) or {}
     identity = context.get("generated_by") or data.get("generated_by") or {}

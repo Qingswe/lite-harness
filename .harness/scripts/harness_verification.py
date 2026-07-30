@@ -278,6 +278,25 @@ def load_verification(change_id):
     return data
 
 
+def parse_statuses(blob):
+    """从一段 verification.json 文本取 {step id: status}。
+
+    供角色隔离检查读取历史修订用。**解析必须留在本模块**：调用方自己
+    json.loads 再摸 id/status，就又造出了第二份解析实现——那正是首表截断
+    bug 的成因。调用方只负责把 blob 取来。
+    """
+    if not blob:
+        return {}
+    try:
+        data = json.loads(blob)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(s.get("id")): str(s.get("status") or "").lower()
+            for s in data.get("steps", []) if isinstance(s, dict)}
+
+
 def step_counts(steps):
     counts = {name: 0 for name in STATUSES}
     for step in steps:
