@@ -5,16 +5,17 @@
 零依赖 Python stdlib HTTP 服务，集中展示并编辑：
 - .harness/current.json                   执行状态（含 working_files / dirty_assumptions / session_wrap_up）
 - openspec/changes/<id>/tasks.md          任务复选框（可编辑）
-- openspec/changes/<id>/human-checks.md   人工检查表格（可编辑）
+- /api/ready                              归档就绪度与阻塞归因（只读）
+- openspec/changes/<id>/verification.json 验证步骤（可编辑，按 step id 寻址）
 
 并只读预览：
 - .harness/checkpoints/<id>/*.md          会话检查点
-- openspec/changes/<id>/verification.md   验证记录
+- openspec/changes/<id>/program.md        约束与评估规则
 - .harness/evidence/<id>*                  验证证据
 - docs/quality/*.md, docs/knowledge/**     长期质量与知识文档
 - .harness/feature-index.json             能力索引
 
-写回按行号 + 乐观锁，只改目标行，保留 UTF-8 无 BOM 编码与换行风格。
+任务写回按行号 + 乐观锁；验证步骤按 step id 寻址，冲突以状态比对判定。
 
 状态解析、schema 校验、lifecycle 推导与写回逻辑都在
 `.harness/scripts/harness_state.py`，与 `harness status` CLI 共用同一份实现；
@@ -32,6 +33,7 @@ _SCRIPTS_DIR = os.path.join(os.path.dirname(WEB_DIR), "scripts")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
+import harness_checks  # noqa: E402
 import harness_state  # noqa: E402
 from harness_state import (  # noqa: E402
     StateConflict,
@@ -41,7 +43,7 @@ from harness_state import (  # noqa: E402
     read_doc,
     toggle_task,
     update_current_state,
-    update_human_check,
+    update_verification_step,
 )
 
 
@@ -90,6 +92,17 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/", "/index.html"):
             self._send_file(os.path.join(WEB_DIR, "index.html"), "text/html; charset=utf-8")
             return
+        if parsed.path == "/api/ready":
+            try:
+                # 与 harness ready 共用同一份实现；看板不新建第二份就绪度推导。
+                # run_strict=False：每个 change 起一次 openspec 子进程对交互式
+                # 看板太慢，strict 仍由 harness lint / close 把关。
+                harness_checks.configure_root(harness_state.ROOT)
+                self._send_json(harness_checks.build_ready_report(
+                    run_strict=False))
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, 500)
+            return
         if parsed.path == "/api/state":
             try:
                 self._send_json(build_state())
@@ -126,15 +139,16 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 self._send_json({"ok": True, "line": line})
                 return
-            if self.path == "/api/human-check":
-                ok, line = update_human_check(
-                    payload["change"], int(payload["line"]), payload["status"],
+            if self.path == "/api/verification-step":
+                ok, current = update_verification_step(
+                    payload["change"], payload["step"], payload["status"],
                     payload.get("operator", ""), payload.get("date", ""),
-                    payload.get("notes", ""), payload.get("expected"))
+                    payload.get("notes", ""), payload.get("expected"),
+                    payload.get("evidence"))
                 if not ok:
-                    self._send_json({"error": "conflict", "current": line}, 409)
+                    self._send_json({"error": "conflict", "current": current}, 409)
                     return
-                self._send_json({"ok": True, "line": line})
+                self._send_json({"ok": True, "status": current})
                 return
             if self.path == "/api/current":
                 current = update_current_state(payload["action"], payload.get("change"))

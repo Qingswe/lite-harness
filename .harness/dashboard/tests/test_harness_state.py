@@ -40,8 +40,37 @@ class SharedImplementationTests(unittest.TestCase):
     def test_server_defines_no_duplicate_state_logic(self):
         source = (DASHBOARD_DIR / "server.py").read_text(encoding="utf-8")
         for marker in ("def normalize_current_state", "def derive_lifecycle",
-                       "def build_state", "def parse_human_checks"):
+                       "def build_state", "def parse_verification_steps"):
             self.assertNotIn(marker, source, "server.py 仍自带 %s" % marker)
+
+    def test_verification_record_has_one_parser(self):
+        """verification.json 的解析只能有一处。
+
+        历史上人工检查有两份解析器，两份都只读第一张表格，第二张表的行对状态
+        计数与关闭门槛同时不可见。这条断言让那类分叉不可能再发生。
+        """
+        import harness_checks
+        import harness_verification as hv
+        # 三个消费方拿到的必须是同一个模块对象，不是各自导入的副本。
+        for module in (harness_state, harness_checks):
+            self.assertIs(module.hv, hv, "%s 应委派同一个解析模块" % module.__name__)
+        self.assertIs(server.parse_verification_steps,
+                      harness_state.parse_verification_steps)
+        # 换根必须整条链一起换，否则两处会各看一个仓库。
+        harness_checks.configure_root(str(DASHBOARD_DIR.parent.parent))
+        self.assertEqual(hv.ROOT, harness_state.ROOT)
+        self.assertEqual(hv.ROOT, harness_checks.ROOT)
+
+    def test_both_platform_wrappers_expose_the_same_subcommands(self):
+        """两平台子命令必须一致，否则同一个 change 在两台机器上结论不同。"""
+        scripts = DASHBOARD_DIR.parent / "scripts"
+        bash = (scripts / "harness").read_text(encoding="utf-8")
+        pwsh = (scripts / "harness.ps1").read_text(encoding="utf-8")
+        for command in ("status", "ready", "next", "lint", "render", "verify",
+                        "close", "sync-candidates", "reset-current"):
+            self.assertIn('"%s"' % command, pwsh,
+                          "harness.ps1 缺少子命令 %s" % command)
+            self.assertIn(command, bash, "harness 缺少子命令 %s" % command)
 
 
 class TempRepoTestCase(unittest.TestCase):

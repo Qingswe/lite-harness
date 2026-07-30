@@ -9,7 +9,9 @@ param(
 
     [switch]$Json,
 
-    [switch]$NoProbe
+    [switch]$NoProbe,
+
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +21,11 @@ Set-Location $RootDir
 function Show-Usage {
     Write-Output "Usage:"
     Write-Output "  .\.harness\scripts\harness.ps1 status [-Json]"
+    Write-Output "  .\.harness\scripts\harness.ps1 ready [-Json]"
+    Write-Output "  .\.harness\scripts\harness.ps1 next [-Json]"
+    Write-Output "  .\.harness\scripts\harness.ps1 autoclose [-DryRun]"
+    Write-Output "  .\.harness\scripts\harness.ps1 lint <change>"
+    Write-Output "  .\.harness\scripts\harness.ps1 render <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 sync-candidates"
     Write-Output "  .\.harness\scripts\harness.ps1 verify <change> [-NoProbe]"
     Write-Output "  .\.harness\scripts\harness.ps1 close <change> [-SkipSpecs] [-NoProbe]"
@@ -31,8 +38,8 @@ function Show-Usage {
     Write-Output "  sync-candidates rewrites candidate membership from openspec\changes\."
     Write-Output "  verify validates OpenSpec and required change files, runs repository structure"
     Write-Output "         checks (doc path references, skill consistency, feature-index sync), and"
-    Write-Output "         runs the Unity probe only when quality-contract.md asks for it."
-    Write-Output "  close checks tasks, human checks, quality docs decision, runs openspec archive,"
+    Write-Output "         runs the Unity probe based on program.md and the verification record."
+    Write-Output "  close runs the shared gate, creates a rollback tag, runs openspec archive,"
     Write-Output "        then finalizes .harness\current.json."
     Write-Output "  reset-current clears .harness\current.json back to an empty execution slot."
     Write-Output ""
@@ -63,33 +70,9 @@ function Get-ChangeDir([string]$ChangeId) {
     Join-Path "openspec\changes" $ChangeId
 }
 
-function Require-ChangeFiles([string]$ChangeId) {
+function Require-ChangeDir([string]$ChangeId) {
     $Dir = Get-ChangeDir $ChangeId
-
     if (-not (Test-Path $Dir -PathType Container)) { Fail "Missing change directory: $Dir" }
-
-    $RequiredFiles = @(
-        "tasks.md",
-        "quality-contract.md",
-        "verification.md",
-        "human-checks.md"
-    )
-
-    foreach ($File in $RequiredFiles) {
-        $Path = Join-Path $Dir $File
-        if (-not (Test-Path $Path -PathType Leaf)) {
-            Fail "Missing $Path. Copy the matching template from .harness\templates\."
-        }
-    }
-}
-
-function Test-TasksComplete([string]$ChangeId) {
-    $TasksFile = Join-Path (Get-ChangeDir $ChangeId) "tasks.md"
-    $Content = Get-Content $TasksFile -Raw
-
-    if ($Content -match '(?m)^\s*-\s*\[\s\]') {
-        Fail "$TasksFile still has incomplete tasks."
-    }
 }
 
 function Invoke-CheckCommand([string[]]$CheckArgs) {
@@ -100,21 +83,26 @@ function Invoke-CheckCommand([string[]]$CheckArgs) {
     return $LASTEXITCODE
 }
 
-function Test-HumanChecksClear([string]$ChangeId) {
-    # Positive assertion: the table must exist, have at least one row, every row
-    # must be passed or waived, and waived rows need a recorded exemption.
-    if ((Invoke-CheckCommand @("human-checks", $ChangeId)) -ne 0) {
-        Fail "Human check results are not conclusive for $ChangeId."
+function Invoke-CloseGate([string]$ChangeId) {
+    # Required files, task completion, verification terminal states, risk floor,
+    # role isolation, and quality-doc pre-screen all live in
+    # harness_checks.py close_gate(). lint and close call the same function, and
+    # both platforms call the same function - never reimplement it here.
+    if ((Invoke-CheckCommand @("gate", $ChangeId)) -ne 0) {
+        Fail "Close gate failed for $ChangeId."
     }
 }
 
-function Test-QualityDocsDecision([string]$ChangeId) {
-    $VerificationFile = Join-Path (Get-ChangeDir $ChangeId) "verification.md"
-    $Content = Get-Content $VerificationFile -Raw
-
-    if ($Content -notmatch '(?m)^##\s+质量文档判断\s*$') {
-        Fail "$VerificationFile is missing the quality docs decision section. Follow docs\quality\README.md."
+function New-RatchetTag([string]$ChangeId) {
+    Require-Command "git"
+    $Tag = "harness/pre-close/$ChangeId"
+    & git rev-parse -q --verify "refs/tags/$Tag" > $null 2>&1
+    if ($LASTEXITCODE -eq 0) { & git tag -d $Tag | Out-Null }
+    & git tag -a $Tag -m "Rollback point before archiving $ChangeId"
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Could not create rollback point $Tag; automatic archiving must abort without one."
     }
+    Write-Output "==> Rollback point: $Tag (roll back with git reset --hard $Tag)"
 }
 
 function Resolve-Python {
@@ -143,7 +131,7 @@ function Invoke-Status([bool]$AsJson) {
 
 function Invoke-Verify([string]$ChangeId, [bool]$SkipProbe) {
     Require-Command "openspec"
-    Require-ChangeFiles $ChangeId
+    Require-ChangeDir $ChangeId
 
     Write-Output "==> OpenSpec strict validation: $ChangeId"
     openspec validate $ChangeId --strict
@@ -183,9 +171,11 @@ function Invoke-Verify([string]$ChangeId, [bool]$SkipProbe) {
 
 function Invoke-Close([string]$ChangeId, [bool]$SkipSpecUpdates, [bool]$SkipProbe) {
     Invoke-Verify $ChangeId $SkipProbe
-    Test-TasksComplete $ChangeId
-    Test-HumanChecksClear $ChangeId
-    Test-QualityDocsDecision $ChangeId
+    Invoke-CloseGate $ChangeId
+
+    # Create the rollback point before archiving: archiving moves directories and
+    # rewrites openspec/specs/, so there is no way back without one.
+    New-RatchetTag $ChangeId
 
     Write-Output "==> Archive change: $ChangeId"
     # --yes keeps the archive non-interactive inside agent sessions.
@@ -223,6 +213,53 @@ function Invoke-StateCommand([string[]]$StateArgs) {
     }
 }
 
+function Invoke-AutoClose([bool]$DryRun) {
+    # Readiness triggers archiving; it never replaces the gate. Every change still
+    # runs the full close path (verify + shared gate + ratchet tag).
+    $Python = Resolve-Python
+    $CheckScript = Join-Path $PSScriptRoot "harness_checks.py"
+    $Json = & $Python $CheckScript ready --json | Out-String
+    if ($LASTEXITCODE -ne 0) { Fail "ready failed." }
+    $Ready = ($Json | ConvertFrom-Json).ready
+    if (-not $Ready -or $Ready.Count -eq 0) {
+        Write-Output "==> No ready change; nothing to archive."
+        return
+    }
+    foreach ($Item in $Ready) {
+        if ($DryRun) {
+            Write-Output "==> [dry-run] would archive: $($Item.change)"
+            continue
+        }
+        Write-Output "==> Auto archiving: $($Item.change)"
+        Invoke-Close $Item.change $false $false
+    }
+}
+
+function Invoke-Lint([string]$ChangeId) {
+    # Same gate assertions as close, without archiving. Runnable at any time.
+    Require-ChangeDir $ChangeId
+    Invoke-CloseGate $ChangeId
+    Write-Output "==> lint passed: $ChangeId"
+}
+
+function Invoke-Ready([bool]$AsJson) {
+    $CheckArgs = @("ready")
+    if ($AsJson) { $CheckArgs += "--json" }
+    if ((Invoke-CheckCommand $CheckArgs) -ne 0) { Fail "ready failed." }
+}
+
+function Invoke-Next([bool]$AsJson) {
+    $CheckArgs = @("next")
+    if ($AsJson) { $CheckArgs += "--json" }
+    if ((Invoke-CheckCommand $CheckArgs) -ne 0) { Fail "next failed." }
+}
+
+function Invoke-Render([string]$ChangeId) {
+    $Python = Resolve-Python
+    & $Python (Join-Path $PSScriptRoot "harness_verification.py") render $ChangeId
+    if ($LASTEXITCODE -ne 0) { Fail "render failed for $ChangeId." }
+}
+
 function Reset-Current {
     Invoke-StateCommand @("reset-current")
 }
@@ -241,14 +278,19 @@ if ($SkipSpecs -and $Command -ne "close") {
     Fail "-SkipSpecs can only be used with close."
 }
 
+if ($DryRun -and $Command -ne "autoclose") {
+    Show-Usage
+    Fail "-DryRun can only be used with autoclose."
+}
+
 if ($NoProbe -and $Command -notin @("verify", "close")) {
     Show-Usage
     Fail "-NoProbe can only be used with verify or close."
 }
 
-if ($Json -and $Command -ne "status") {
+if ($Json -and $Command -notin @("status", "ready", "next")) {
     Show-Usage
-    Fail "-Json can only be used with status."
+    Fail "-Json can only be used with status, ready, or next."
 }
 
 switch ($Command) {
@@ -258,6 +300,35 @@ switch ($Command) {
             Fail "status does not take a <change> argument."
         }
         Invoke-Status ([bool]$Json)
+    }
+    "ready" {
+        if (-not [string]::IsNullOrWhiteSpace($Change)) {
+            Show-Usage
+            Fail "ready does not take a <change> argument."
+        }
+        Invoke-Ready ([bool]$Json)
+    }
+    "next" {
+        if (-not [string]::IsNullOrWhiteSpace($Change)) {
+            Show-Usage
+            Fail "next does not take a <change> argument."
+        }
+        Invoke-Next ([bool]$Json)
+    }
+    "autoclose" {
+        if (-not [string]::IsNullOrWhiteSpace($Change)) {
+            Show-Usage
+            Fail "autoclose does not take a <change> argument."
+        }
+        Invoke-AutoClose ([bool]$DryRun)
+    }
+    "lint" {
+        Require-ChangeArg "lint" $Change
+        Invoke-Lint $Change
+    }
+    "render" {
+        Require-ChangeArg "render" $Change
+        Invoke-Render $Change
     }
     "verify" {
         Require-ChangeArg "verify" $Change

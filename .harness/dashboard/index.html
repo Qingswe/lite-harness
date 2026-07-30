@@ -153,7 +153,13 @@
   table.checks { width: 100%; border-collapse: collapse; margin-top: 4px; }
   table.checks th, table.checks td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
   table.checks th { color: var(--muted); font-weight: 500; font-size: 12px; }
-  table.checks td.item { max-width: 320px; }
+  table.checks td.item { max-width: 520px; }
+  .step-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); letter-spacing: .04em; margin-bottom: 3px; }
+  .criterion { font-size: 12px; line-height: 1.45; margin: 2px 0; }
+  .criterion.pass { border-left: 2px solid #3fb950; padding-left: 6px; }
+  .criterion.fail { border-left: 2px solid #d29922; padding-left: 6px; }
+  .criterion.why { color: var(--muted); font-style: italic; }
+  .role-human { color: #d29922; }
   select.status, input.cell {
     background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 5px; padding: 4px 6px; font-size: 13px; width: 100%;
@@ -243,7 +249,7 @@
 <div id="toast"></div>
 
 <script>
-const COLS = ["状态", "检查项", "操作者", "日期", "证据或备注"];
+const COLS = ["状态", "步骤与判定契约", "操作者", "日期", "备注"];
 const PHASES = {
   planned: { label:"已规划", cls:"cand", dot:"cand" },
   implementing: { label:"实施中", cls:"active", dot:"active" },
@@ -411,6 +417,50 @@ function renderContent() {
 }
 
 // ---------- 概览（current.json） ----------
+const OWNER_LABEL = { human: "人", ai: "AI", external: "外部" };
+
+async function loadReadyInto(box) {
+  let data;
+  try {
+    const res = await fetch("/api/ready");
+    data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || res.status);
+  } catch (e) {
+    box.lastChild.replaceWith(el("div", { class: "notice error", text: "就绪度载入失败： " + e.message }));
+    return;
+  }
+  const holder = el("div");
+  holder.appendChild(el("div", { class: "section-title" }, [
+    el("span", { text: "可归档（" + data.ready.length + "）" })]));
+  if (data.ready.length) {
+    data.ready.forEach(item => {
+      const deps = (item.depends_on || []);
+      holder.appendChild(el("div", { class: "candidate-entry" }, [
+        el("div", { class: "candidate-head" }, [
+          changeLink(item.change),
+          el("span", { class: "pill ready", text: deps.length ? "依赖 " + deps.join("、") : "依赖已满足" }),
+        ]),
+      ]));
+    });
+  } else {
+    holder.appendChild(el("div", { class: "empty", text: "无" }));
+  }
+  holder.appendChild(el("div", { class: "section-title" }, [
+    el("span", { text: "被阻塞（" + data.blocked.length + "）" })]));
+  data.blocked.forEach(item => {
+    holder.appendChild(el("div", { class: "candidate-entry" }, [
+      el("div", { class: "candidate-head" }, [
+        changeLink(item.change),
+        el("span", { class: "pill " + (item.owner === "human" ? "await" : "cand"),
+                     text: "[" + (OWNER_LABEL[item.owner] || item.owner) + "]" }),
+      ]),
+      // 只列差的那一件事：人需要的是下一个动作，不是清单。
+      el("div", { class: "candidate-summary", text: item.next_action }),
+    ]));
+  });
+  box.lastChild.replaceWith(holder);
+}
+
 function renderOverview(box) {
   const c = STATE.current;
   box.appendChild(el("h1", { class: "page-title" }, [el("span", { text: "📊 概览" })]));
@@ -448,6 +498,16 @@ function renderOverview(box) {
     queueGrid.appendChild(card);
   });
   box.appendChild(queueGrid);
+
+  // 归档就绪度：数据来自 /api/ready，与 `harness ready` 同一份实现。
+  const readyBox = el("div", { class: "panel" });
+  readyBox.appendChild(el("div", { class: "section-title" }, [
+    el("span", { text: "归档就绪度" }),
+    el("span", { class: "mini-counts", text: "与 harness ready 同源" }),
+  ]));
+  readyBox.appendChild(el("div", { class: "empty", text: "载入中…" }));
+  box.appendChild(readyBox);
+  loadReadyInto(readyBox);
 
   const b = el("div", { class: "banner" });
   b.appendChild(row("执行中", [ c.active_change
@@ -579,20 +639,34 @@ function renderChangeDetail(box, ch) {
   if (!ch.has_tasks) body.appendChild(el("div", { class: "empty", text: "未创建 tasks.md" }));
   else body.appendChild(renderTasks(ch, bar, num));
 
-  // 人工检查
+  // 验证步骤
   const cc = ch.check_counts || {};
   const counts = el("span", { class: "mini-counts", html:
     `<span class="dot passed"></span>${cc.passed||0} <span class="dot pending"></span>${cc.pending||0} <span class="dot failed"></span>${cc.failed||0} <span class="dot waived"></span>${cc.waived||0}` });
-  body.appendChild(el("div", { class: "section-title" }, [el("span", { text: "人工检查" }), counts]));
-  if (!ch.has_checks) body.appendChild(el("div", { class: "empty", text: "未创建 human-checks.md" }));
-  else if (!ch.human_checks.length) body.appendChild(el("div", { class: "empty", text: "无检查项" }));
-  else body.appendChild(renderChecks(ch));
+  body.appendChild(el("div", { class: "section-title" }, [el("span", { text: "验证步骤" }), counts]));
+  if (ch.verification_error) {
+    // 解析不了必须说出来，不能显示成"没有未完成项"。
+    body.appendChild(el("div", { class: "notice error", text: "验证记录不可解析： " + ch.verification_error }));
+  } else if (!ch.steps || !ch.steps.length) {
+    body.appendChild(el("div", { class: "empty", text: "无验证步骤" }));
+  } else {
+    const human = ch.steps.filter(s => s.role === "human");
+    const auto = ch.steps.filter(s => s.role !== "human");
+    if (human.length) {
+      body.appendChild(el("div", { class: "section-title" }, [el("span", { class: "role-human", text: "需要人（" + human.length + "）" })]));
+      body.appendChild(renderSteps(ch, human));
+    }
+    if (auto.length) {
+      body.appendChild(el("div", { class: "section-title" }, [el("span", { text: "自动验证（" + auto.length + "）" })]));
+      body.appendChild(renderSteps(ch, auto));
+    }
+  }
 
   // 只读预览：验证 / 检查点 / 证据
   if (ch.verification) {
     body.appendChild(el("div", { class: "section-title" }, [el("span", { text: "验证记录" })]));
     const vh = el("div");
-    body.appendChild(fold("📋 verification.md", vh, () => loadDocInto(ch.verification, vh)));
+    body.appendChild(fold("📋 program.md", vh, () => loadDocInto(ch.program || ch.verification, vh)));
   }
   if (ch.checkpoints && ch.checkpoints.length) {
     body.appendChild(el("div", { class: "section-title" }, [el("span", { text: "检查点 (" + ch.checkpoints.length + ")" })]));
@@ -651,22 +725,23 @@ function renderTasks(ch, bar, num) {
   });
   return ul;
 }
-function renderChecks(ch) {
+function renderSteps(ch, steps) {
   const table = el("table", { class: "checks" });
   table.appendChild(el("tr", {}, COLS.map(c => el("th", { text: c }))));
-  ch.human_checks.forEach(r => table.appendChild(renderCheckRow(ch, r)));
+  steps.forEach(s => table.appendChild(renderStepRow(ch, s)));
   return table;
 }
-function renderCheckRow(ch, r) {
+function renderStepRow(ch, r) {
   const tr = el("tr");
   const state = { status: r.status, operator: r.operator, date: r.date, notes: r.notes };
   async function save() {
-    const { res, data } = await api("/api/human-check", {
-      change: ch.id, line: r.line, expected: r.raw,
+    // 按 step id 寻址，冲突以状态比对判定；不再携带原始整行。
+    const { res, data } = await api("/api/verification-step", {
+      change: ch.id, step: r.id, expected: r.status,
       status: state.status, operator: state.operator, date: state.date, notes: state.notes });
-    if (res.status === 409) { toast("文件已被外部修改，正在刷新…", "err"); return load(); }
+    if (res.status === 409) { toast("步骤已被外部修改，正在刷新…", "err"); return load(); }
     if (!res.ok) { toast("保存失败: " + (data.error || res.status), "err"); return; }
-    r.raw = data.line; r.status = state.status; r.operator = state.operator;
+    r.status = state.status; r.operator = state.operator;
     r.date = state.date; r.notes = state.notes; toast("已保存", "ok");
   }
   const sel = el("select", { class: "status s-" + r.status });
@@ -675,7 +750,17 @@ function renderCheckRow(ch, r) {
   });
   sel.addEventListener("change", () => { state.status = sel.value; sel.className = "status s-" + sel.value; save(); });
   tr.appendChild(el("td", {}, [sel]));
-  tr.appendChild(el("td", { class: "item", text: r.item }));
+
+  // 判定契约直接摆在作答处：人不该为了回答一个检查项去回读设计文档。
+  const item = el("td", { class: "item" });
+  item.appendChild(el("div", { class: "step-id", text: r.id + (r.rule ? " · " + r.rule : "") }));
+  if (r.observe) item.appendChild(el("div", { class: "criterion", text: "观察： " + r.observe }));
+  item.appendChild(el("div", { class: "criterion pass", text: "通过： " + (r.item || "—") }));
+  if (r.fail_when) item.appendChild(el("div", { class: "criterion fail", text: "失败： " + r.fail_when }));
+  if (r.needs_human_because) item.appendChild(el("div", { class: "criterion why", text: "需人： " + r.needs_human_because }));
+  if (r.evidence && r.evidence.length) item.appendChild(el("div", { class: "criterion", text: "证据： " + r.evidence.join("、") }));
+  tr.appendChild(item);
+
   tr.appendChild(el("td", {}, [textCell(r.operator, v => state.operator = v, save)]));
   const dateInput = el("input", { class: "cell", value: r.date });
   dateInput.addEventListener("change", () => { state.date = dateInput.value; save(); });
