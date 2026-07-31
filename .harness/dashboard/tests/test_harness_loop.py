@@ -396,6 +396,116 @@ class RoleIsolationTests(LoopTestCase):
         self.assertEqual({}, hv.parse_statuses(None))
 
 
+class ModifiedScenarioTests(LoopTestCase):
+    """MODIFIED 块漏掉现有场景必须在 lint 报出，而不是拖到 archive 才炸。
+
+    实测来源：simplify-harness-change-artifacts 自己的
+    harness-human-check-format delta 把两条场景改了名，strict 校验通过、
+    就绪度为真，直到 openspec archive 才拒绝——而 archive 是不可逆步骤。
+    """
+
+    def write_specs(self, current, delta, cap="cap-a",
+                    change_id="alpha"):
+        cur = self.root / "openspec" / "specs" / cap
+        cur.mkdir(parents=True, exist_ok=True)
+        (cur / "spec.md").write_text(current, encoding="utf-8")
+        dlt = self.root / "openspec" / "changes" / change_id / "specs" / cap
+        dlt.mkdir(parents=True, exist_ok=True)
+        (dlt / "spec.md").write_text(delta, encoding="utf-8")
+
+    def test_renamed_scenario_reads_as_dropped(self):
+        self.make_change()
+        self.write_specs(
+            "## Purpose\n\n### Requirement: R\n\n#### Scenario: 空表格不得通过\n"
+            "- **WHEN** a\n- **THEN** b\n",
+            "## MODIFIED Requirements\n\n### Requirement: R\n\n"
+            "#### Scenario: 空记录不得通过\n- **WHEN** a\n- **THEN** b\n")
+        problems = harness_checks.check_modified_scenarios("alpha")
+        self.assertEqual(1, len(problems))
+        self.assertIn("空表格不得通过", problems[0])
+        self.assertIn("REMOVED + ADDED", problems[0])
+
+    def test_preserving_every_scenario_passes(self):
+        self.make_change()
+        self.write_specs(
+            "## Purpose\n\n### Requirement: R\n\n#### Scenario: 甲\n"
+            "- **WHEN** a\n- **THEN** b\n",
+            "## MODIFIED Requirements\n\n### Requirement: R\n\n"
+            "#### Scenario: 甲\n- **WHEN** a\n- **THEN** c\n\n"
+            "#### Scenario: 乙\n- **WHEN** d\n- **THEN** e\n")
+        self.assertEqual([], harness_checks.check_modified_scenarios("alpha"))
+
+    def test_removed_plus_added_is_the_sanctioned_rename(self):
+        self.make_change()
+        self.write_specs(
+            "## Purpose\n\n### Requirement: 旧名\n\n#### Scenario: 甲\n"
+            "- **WHEN** a\n- **THEN** b\n",
+            "## ADDED Requirements\n\n### Requirement: 新名\n\n"
+            "#### Scenario: 甲\n- **WHEN** a\n- **THEN** b\n\n"
+            "## REMOVED Requirements\n\n### Requirement: 旧名\n\n"
+            "**Reason**: 换主语\n")
+        self.assertEqual([], harness_checks.check_modified_scenarios("alpha"))
+
+    def test_modifying_a_nonexistent_requirement_is_reported(self):
+        self.make_change()
+        self.write_specs(
+            "## Purpose\n\n### Requirement: R\n\n#### Scenario: 甲\n"
+            "- **WHEN** a\n- **THEN** b\n",
+            "## MODIFIED Requirements\n\n### Requirement: 全新的\n\n"
+            "#### Scenario: 乙\n- **WHEN** a\n- **THEN** b\n")
+        problems = harness_checks.check_modified_scenarios("alpha")
+        self.assertEqual(1, len(problems))
+        self.assertIn("ADDED", problems[0])
+
+    def test_close_gate_includes_the_check(self):
+        self.make_change(steps=[self.passed_step()])
+        self.write_specs(
+            "## Purpose\n\n### Requirement: R\n\n#### Scenario: 甲\n"
+            "- **WHEN** a\n- **THEN** b\n",
+            "## MODIFIED Requirements\n\n### Requirement: R\n\n"
+            "#### Scenario: 乙\n- **WHEN** a\n- **THEN** b\n")
+        self.assertTrue(any("漏掉" in p
+                            for p in harness_checks.close_gate("alpha")))
+
+
+class FinalizeCloseTests(LoopTestCase):
+    """归档后不得留下指向已归档 change 的下一个动作。"""
+
+    def write_current(self, payload):
+        (self.root / ".harness").mkdir(parents=True, exist_ok=True)
+        (self.root / ".harness" / "current.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        harness_state.configure_root(str(self.root))
+
+    def test_pointer_cleared_even_when_not_active(self):
+        self.write_current({
+            "schema_version": 2, "active_change": None,
+            "candidate_changes": ["alpha", "beta"],
+            "change_context": {"alpha": {"summary": "s"}},
+            "current_task": "alpha：等待第四次人工判定",
+            "next_action": "人工复核 alpha 的材料",
+        })
+        result = harness_state.finalize_close("alpha")
+        loaded = harness_state.load_current()
+        self.assertIsNone(loaded["current_task"])
+        self.assertIsNone(loaded["next_action"])
+        self.assertEqual(["beta"], loaded["candidate_changes"])
+        self.assertFalse(result["released_active"])
+
+    def test_unrelated_pointer_survives(self):
+        self.write_current({
+            "schema_version": 2, "active_change": None,
+            "candidate_changes": ["alpha", "beta"],
+            "change_context": {},
+            "current_task": "beta：推进 3.1",
+            "next_action": "继续 beta",
+        })
+        harness_state.finalize_close("alpha")
+        loaded = harness_state.load_current()
+        self.assertEqual("beta：推进 3.1", loaded["current_task"])
+        self.assertEqual("继续 beta", loaded["next_action"])
+
+
 class DashboardStepWriteTests2(LoopTestCase):
     def test_server_ready_endpoint_shares_one_implementation(self):
         self.assertIs(server.harness_checks.build_ready_report,

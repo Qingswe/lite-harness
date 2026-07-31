@@ -990,6 +990,16 @@ def finalize_close(change_id):
         released_active = True
         removed.append("active_change")
 
+    # 已完成实现但已从 active 槽释放的 change 走的是另一条路径：它不在
+    # active_change 上，所以上面那段不会执行，而 current_task / next_action
+    # 仍然指着它。实测归档后 status 的「下一步」还在让人去复核一个已经不存在
+    # 的 change——「下一个动作与实际不符」正是就绪度判据要消灭的东西。
+    for field in ("current_task", "next_action"):
+        value = loaded.get(field)
+        if isinstance(value, str) and change_id in value:
+            loaded[field] = None
+            removed.append(field)
+
     summary = loaded.get("verification_summary")
     if isinstance(summary, dict) and summary.get("active_change") == change_id:
         summary["active_change"] = None
@@ -1138,8 +1148,12 @@ def format_status(status):
         # 消灭的失效（一个 224 字节的散文文档曾一直显示为零 pending）。
         if c.get("verification_error"):
             flags.append("验证记录不可解析")
+        # 这里数的是 hv.lint 的记录格式问题，不是完整的关闭门槛——完整门槛要跑
+        # git（角色隔离、归因），status 会从 0.05s 变成 12s，而 status 是每轮
+        # 会话都跑的命令。所以标签只承诺它真的检查了的东西；门槛结论去
+        # `harness ready` 或 `harness lint <id>` 看。
         if c.get("lint_problems"):
-            flags.append("门槛 %d 项待修" % c["lint_problems"])
+            flags.append("记录格式 %d 项待修" % c["lint_problems"])
         if c["pending_steps"]:
             flags.append("step %d pending" % c["pending_steps"])
         if c["failed_steps"]:

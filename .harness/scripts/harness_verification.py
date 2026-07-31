@@ -632,12 +632,12 @@ def lint(change_id):
         if triggered is not None and not isinstance(triggered, list):
             problems.append("quality_docs.triggered 必须是数组")
         else:
+            # 只校验形状。「触发了但没写理由」是进度缺口不是格式缺陷，
+            # 由 close 门槛的 check_quality_docs 单独报告并指名是哪一份文档；
+            # 在这里再报一次只会让同一件事出现两行。
             for item in triggered or []:
-                if not isinstance(item, dict) or not str(
-                        item.get("reason") or "").strip():
-                    problems.append(
-                        "quality_docs.triggered 中存在缺少 reason 的条目；"
-                        "被触发的条目必须给出人工理由")
+                if not isinstance(item, dict):
+                    problems.append("quality_docs.triggered 含非对象条目")
 
     _check_program(change_id, steps, problems)
     return problems

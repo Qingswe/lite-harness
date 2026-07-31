@@ -548,11 +548,87 @@ def check_quality_docs(change_id):
     return problems
 
 
+REQUIREMENT_RE = re.compile(r"^###\s+Requirement:\s*(.+?)\s*$")
+SCENARIO_RE = re.compile(r"^####\s+Scenario:\s*(.+?)\s*$")
+DELTA_SECTION_RE = re.compile(r"^##\s+(ADDED|MODIFIED|REMOVED|RENAMED)\b")
+
+
+def _spec_requirements(path, delta=False):
+    """把一份 spec 解析成 {(区段, 需求名): [场景名]}。
+
+    非 delta 文件没有 `## ADDED` 这类区段，统一记在区段 `""` 下。
+    """
+    out = {}
+    section = ""
+    key = None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return out
+    for raw in lines:
+        if delta:
+            m = DELTA_SECTION_RE.match(raw)
+            if m:
+                section, key = m.group(1), None
+                continue
+        m = REQUIREMENT_RE.match(raw)
+        if m:
+            key = (section, m.group(1))
+            out.setdefault(key, [])
+            continue
+        m = SCENARIO_RE.match(raw)
+        if m and key is not None:
+            out[key].append(m.group(1))
+    return out
+
+
+def check_modified_scenarios(change_id):
+    """MODIFIED 块必须复述当前 spec 里该需求的全部场景。
+
+    openspec 按场景名匹配，所以在 MODIFIED 块里改名与删除无法区分——它会在
+    archive 时硬失败。archive 是不可逆步骤，这个检查把同一个判定提前到 lint，
+    否则一个 change 可以一路显示为「就绪」，直到最后一步才炸。
+
+    真的要改名或换主语时用 REMOVED + ADDED，并在 Reason/Migration 里写清替换
+    关系——那样读者能看到断言去了哪，而不是凭空消失。
+    """
+    delta_root = os.path.join(ROOT, "openspec", "changes", change_id, "specs")
+    if not os.path.isdir(delta_root):
+        return []
+    problems = []
+    for cap in sorted(os.listdir(delta_root)):
+        delta_path = os.path.join(delta_root, cap, "spec.md")
+        current_path = os.path.join(ROOT, "openspec", "specs", cap, "spec.md")
+        if not os.path.isfile(delta_path) or not os.path.isfile(current_path):
+            continue
+        delta = _spec_requirements(delta_path, delta=True)
+        current = _spec_requirements(current_path)
+        for (section, name), scenarios in sorted(delta.items()):
+            if section != "MODIFIED":
+                continue
+            existing = current.get(("", name))
+            if existing is None:
+                problems.append(
+                    "%s 的 MODIFIED 需求「%s」在当前 spec 中不存在；"
+                    "新增需求应放在 ADDED 区段" % (cap, name))
+                continue
+            dropped = [s for s in existing if s not in scenarios]
+            if dropped:
+                problems.append(
+                    "%s 的 MODIFIED 需求「%s」漏掉了当前 spec 已有的场景 %s；"
+                    "openspec archive 会拒绝并视为丢失断言。若是改名或换主语，"
+                    "改用 REMOVED + ADDED 并说明替换关系"
+                    % (cap, name, "、".join("「%s」" % s for s in dropped)))
+    return problems
+
+
 def close_gate(change_id):
     """close 与 lint 共用的门槛断言。两者 MUST 调用本函数，不得各写一份。"""
     problems = list(check_change_files(change_id))
     if problems:
         return problems
+    problems.extend(check_modified_scenarios(change_id))
     problems.extend(check_tasks_complete(change_id))
     problems.extend(check_verification(change_id))
     problems.extend(check_risk_floor(change_id))
