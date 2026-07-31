@@ -31,15 +31,14 @@
 4. 如果存在 active change，读取：
    - `openspec/changes/<active_change>/proposal.md`
    - `tasks.md`
-   - `quality-contract.md`
-   - `verification.md`
-   - `human-checks.md`
+   - `program.md`
+   - `verification.json`
 5. 检查这些异常：
    - OpenSpec 未初始化或 `openspec list` 失败。
    - active change 缺必需文件。
-   - `tasks.md` 有已勾选项但 `verification.md` 没有对应证据。
-   - 已释放且仍有 pending/failed human checks 的 change 不在 candidate/context 中，或没有 gated phase、next action、checkpoint/evidence pointer。
-   - lifecycle phase 与 `tasks.md` / `human-checks.md` 权威事实矛盾，例如仍有 pending/failed 却标为 `ready_to_close`。
+   - `tasks.md` 有已勾选项但 `verification.json` 没有对应证据。
+   - 已释放且仍有 pending/failed `role: human` 步骤的 change 不在 candidate/context 中，或没有 gated phase、next action、checkpoint/evidence pointer。
+   - 人工写入的 lifecycle phase 比计算就绪度更宽松，例如仍有 pending/failed 步骤却标为 `ready_to_close`——`harness ready` 应采信计算结果并报告是哪一项判据。
    - 两个 change 声称 active，canonical ID 无法解析，或 schema v2 仍混入 `change-id (summary)` annotated entry。
    - `.harness/current.json` 指向不存在的 change。
    - `.harness/current.json` 被暂存进 Git，且不是有意更新模板状态。

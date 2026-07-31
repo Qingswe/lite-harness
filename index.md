@@ -42,7 +42,7 @@
 1. 在项目根目录运行 `openspec init`，初始化 OpenSpec。
 2. 根据项目实际情况填写 `.harness/current.json` 和 `ARCHITECTURE.md`。
 3. 为第一个候选变更创建 `openspec/changes/<change>/`，至少包含 `proposal.md`、`tasks.md` 和 spec 增量草案。
-4. 选定 active change 后，从 `.harness/templates/` 复制 `quality-contract.md`、`verification.md`、`human-checks.md`。
+4. 选定 active change 后，从 `.harness/templates/` 复制 `program.md` 与 `verification.json`。
 
 日常工作循环见 `CLAUDE.md`。
 
@@ -52,7 +52,7 @@
 
 覆盖式当前恢复点。只保留新会话恢复所需的最小信息：唯一 active 执行 change（`active_change`）、候选 change、当前 task、最后验证 task、working files、blocker、next action、dirty assumptions、last checkpoint。
 
-`active_change` 是唯一执行槽；它仍保留这个字段名以兼容现有脚本和 agent 习惯，但语义是 active execution change。候选 change 不进入执行槽，不能改实现代码或写最终验证结论。实现和自动验证已完成但仍待人工检查的 change 可以不是 active，它只等待 `human-checks.md` 被人工更新后再 close。
+`active_change` 是唯一执行槽；它仍保留这个字段名以兼容现有脚本和 agent 习惯，但语义是 active execution change。候选 change 不进入执行槽，不能改实现代码或写最终验证结论。实现和自动验证已完成但仍待人工检查的 change 可以不是 active，它只等待 `verification.json` 中的 `role: human` 步骤被人工作答后自动 close。
 
 ### `.harness/feature-index.json`
 
@@ -66,9 +66,8 @@
 
 存放变更级模板：
 
-- `quality-contract.md`：实施前质量要求。
-- `verification.md`：实施后真实验证证据。
-- `human-checks.md`：Unity 编辑器、Prefab、真机等人工检查。
+- `program.md`：本次变更的约束与评估规则；评估规则是 Evaluator 判定通过/失败的唯一权威。
+- `verification.json`：验证步骤与结论，按 `role` 区分自动验证与人工验证。
 - `checkpoint.md`：会话恢复摘要。
 
 ### `docs/quality/`
@@ -93,7 +92,7 @@
 - `harness status [--json]`：一次输出会话恢复所需的执行状态——active 槽、候选 change 与 lifecycle phase、blocker、next action、任务进度、证据数量、漂移告警和最近提交。漂移或状态错误时以非零码退出。
 - `harness sync-candidates`：按 `openspec/changes/` 的实际内容重写候选集合。候选成员关系不由人工维护，per-change context 原样保留。
 - `harness verify <change>`：校验 OpenSpec、检查变更级质量文件，并运行平台环境探针。
-- `harness close <change> [--skip-specs]`：在 verify 通过、tasks 完成、human checks 无 pending/failed，且 `verification.md` 已记录「质量文档判断」后执行 `openspec archive`，随后自动收尾 `.harness/current.json`。`--skip-specs` 用于 infra、工具或纯文档变更。
+- `harness close <change> [--skip-specs]`：在 verify 与共享门槛断言通过后建立回滚点 `harness/pre-close/<change>`，执行 `openspec archive`，随后自动收尾 `.harness/current.json`。就绪度成立时由循环自动调用。`--skip-specs` 用于 infra、工具或纯文档变更。
 - `harness reset-current`：清空 `.harness/current.json`，只保留可恢复的空执行槽。
 
 Windows 用 `.\.harness\scripts\harness.ps1`，选项名为 `-SkipSpecs` 与 `-Json`。
@@ -114,4 +113,4 @@ Windows 用 `.\.harness\scripts\harness.ps1`，选项名为 `-SkipSpecs` 与 `-J
 
 ## 暂缓事项
 
-第一版只定义 hook 边界，不强制实现完整 Claude Code hook 系统。等 `.harness/current.json`、`verification.md`、`human-checks.md` 格式稳定后，再实现 `SessionStart`、`PreCompact`、`Stop` 等 hook。
+第一版只定义 hook 边界，不强制实现完整 Claude Code hook 系统。等 `.harness/current.json` 与 `verification.json` 格式稳定后，再实现 `SessionStart`、`PreCompact`、`Stop` 等 hook。

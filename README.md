@@ -30,10 +30,12 @@
 | 当前产品事实 | `openspec/specs/` |
 | 变更设计 | `openspec/changes/<id>/`（proposal、design、spec 增量、tasks） |
 | 执行状态 | `.harness/current.json`（唯一 active 执行槽、候选 change 与恢复点） |
-| 验证证据 | 对应 change 的 `verification.md`、`human-checks.md`、`.harness/evidence/` |
+| 验证证据 | 对应 change 的 `verification.json`、`.harness/evidence/` |
 | 知识归档 | `openspec/archive/`、`docs/adr/`、`docs/knowledge/` |
 
-**OpenSpec** 负责定义 WHAT（产品行为、变更提案、任务清单、归档事实）；**Harness** 负责管理 HOW（恢复点、checkpoint、质量契约、验证证据、人工检查、收尾命令）。
+**OpenSpec** 负责定义 WHAT（产品行为、变更提案、任务清单、归档事实）；**Harness** 负责管理 HOW（恢复点、checkpoint、约束与评估规则、验证证据、角色边界、归档就绪度）。
+
+循环里有两个角色，由不同 agent、不同模型承担：**Generator** 推进实现并勾任务，**Evaluator** 判定验证步骤并写证据。谁都不能做对方那一半——自动归档下这条独立性是唯一挡住自批作业的东西。角色契约写在客户端中立的 `.harness/program.md`。
 
 ## 前置依赖
 
@@ -56,7 +58,7 @@ openspec init
 
 1. 确认当前工作目录为项目根目录。
 2. 读取 `.harness/current.json`，确认 `active_change`、候选 change、当前 task、blocker 与 next action。
-3. 运行 `openspec list` 查看变更列表；读取 active change 的 `proposal.md`、`tasks.md`、`quality-contract.md`。
+3. 运行 `openspec list` 查看变更列表；读取 active change 的 `proposal.md`、`tasks.md`、`program.md`。
 4. 查阅 `git log --oneline -5` 了解近期提交。
 5. 读取相关 `ARCHITECTURE.md`、`docs/architecture/` 与 `docs/quality/scorecard.md`。
 6. 运行 `init.ps1`（Windows）或 `init.sh`（Unix / macOS / Linux）执行环境探针。
@@ -67,18 +69,25 @@ openspec init
 
 - `openspec/changes/` 下可并存多个候选 change，但候选阶段仅做调研、proposal、design、spec 草案与 tasks 规划。
 - 同一时间仅允许一个 active 执行 change：`.harness/current.json` 中的 `active_change` 为唯一执行槽；仅该 change 可进行实现、更新 `openspec/specs/`、写入本轮自动验证证据。
-- 实现和自动验证已完成但仍等待人工检查的 change，可以从 active 执行槽释放出来，待人工在 dashboard 中处理 `human-checks.md` 后再按明确指令 close。
+- 实现和自动验证已完成但仍等待人工检查的 change，可以从 active 执行槽释放出来，等 `verification.json` 中 `role: human` 的步骤被人工作答后由循环自动 close。
 - 无运行证据时不得标记任务完成；不得通过修改 `tasks.md` 勾选状态或削弱测试来掩盖未完成工作。
-- 变更归档须由人工明确指定 change，并通过 `.harness/scripts/harness close <id>` 执行，不得直接调用 `openspec archive`。
+- 归档由就绪度驱动：七项判据全部成立时 `harness autoclose` 自动执行，不需要人工逐个确认归档动作。取消的是归档动作的确认，不是人工步骤本身——任何未作答的 `role: human` 步骤都会让就绪度为假。任何情况下都不要直接调用 `openspec archive`。
 
 完整规则见 [AGENTS.md](AGENTS.md) 与 [CLAUDE.md](CLAUDE.md)。
 
 ## Harness 命令
 
 ```bash
-.harness/scripts/harness verify <change>   # OpenSpec 严格校验、变更级质量文件检查与环境探针
-.harness/scripts/harness close  <change>   # 在 verify 通过、tasks 完成、human-checks 无 pending/failed、
-                                           # 且 verification.md 已记录质量文档判断后执行归档
+.harness/scripts/harness status            # active 槽、候选、blocker、next action、漂移，一次给全
+.harness/scripts/harness ready             # 现在能归档哪些，其余各差哪一件事、责任方是谁
+.harness/scripts/harness next  --json      # 循环的下一个动作：哪个 change、哪条 task、该派哪个角色
+.harness/scripts/harness lint  <change>    # 与 close 完全相同的门槛断言，但不归档，任何时刻可跑
+.harness/scripts/harness check <change> <step> <status> --commit
+                                           # 按步骤标识写验证结论，单独成一个提交
+.harness/scripts/harness render <change>   # 把 verification.json 渲染成 markdown 供人阅读
+.harness/scripts/harness verify <change>   # OpenSpec 严格校验、仓库结构检查与环境探针
+.harness/scripts/harness autoclose         # 归档全部就绪的 change，按依赖顺序
+.harness/scripts/harness rollback <change> # 把仓库退回某次归档之前；有残留就报错，不算成功
 ```
 
 Windows 环境可使用 `.harness/scripts/harness.ps1`。
@@ -128,10 +137,11 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 ├── .harness/
 │   ├── current.json           # 当前恢复点（唯一 active 执行槽）
 │   ├── feature-index.json     # 能力索引（非任务管理器）
-│   ├── templates/             # quality-contract / verification / human-checks / checkpoint
+│   ├── program.md             # 循环宪法：角色边界、归档策略、回滚规则与预算
+│   ├── templates/             # program / verification / checkpoint
 │   ├── checkpoints/           # 会话交接快照
 │   ├── evidence/              # 验证证据
-│   ├── scripts/               # harness verify | close
+│   ├── scripts/               # harness status | ready | next | lint | check | close ...
 │   └── dashboard/             # 本地看板
 └── docs/
     ├── architecture/  adr/    # 架构说明与架构决策记录
@@ -145,10 +155,13 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 
 - `tasks.md` 中所有任务均已勾选完成。
 - `openspec validate <id> --strict` 校验通过。
-- 质量契约要求的自动验证均已执行，证据已写入 `verification.md` 与 `.harness/evidence/`。
-- `human-checks.md` 中须人工确认的项目状态为 `passed` 或已明确 `waived`。
-- `verification.md` 已记录质量文档判断，且相关长期质量或知识文档已同步更新。
-- `.harness/current.json` 与 checkpoint 已更新至最新状态；若仍待人工检查，应已释放 active 执行槽并记录后续 close 条件。
+- `verification.json` 全部步骤为 `passed` 或 `waived`，`waived` 均有说明。
+- 步骤引用的每个证据路径真实存在。
+- `program.md` 的每条评估规则至少被一个已通过或已豁免的步骤覆盖。
+- 质量文档预筛已运行，被触发的条目均有人工理由。
+- 角色隔离校验通过：不存在同时改实现又把步骤置为终态的提交，且 `evaluated_by` 不等于本 change 的 generator 身份。
+
+这七项由 `harness ready` 计算，全部成立才自动归档。**人工写入的 lifecycle phase 只能收紧不能放宽**——声称可归档但计算判定未就绪时，采信计算结果并报告是哪一项判据。就绪度只驱动触发；`harness close` 仍执行完整门槛断言，就绪度误报时它是最后一道。
 
 ## 许可证
 

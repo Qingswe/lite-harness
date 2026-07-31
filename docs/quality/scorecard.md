@@ -2,7 +2,7 @@
 
 这份文档只记录项目和领域的长期质量**当前快照**，不记录单次变更的完整验证日志。
 
-- 单次变更的质量要求写在 `openspec/changes/<change>/quality-contract.md`，真实验证证据写在 `openspec/changes/<change>/verification.md`。
+- 单次变更的约束与评估规则写在 `openspec/changes/<change>/program.md`，真实验证证据写在 `openspec/changes/<change>/verification.json`。
 - 每次评分变化的理由与详细证据写在 `docs/quality/scorecard-history.md`。
 - 单元格只写结论与指针，不写完整测试日志；写法约束见 `docs/quality/README.md`。
 

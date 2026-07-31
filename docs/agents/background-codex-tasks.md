@@ -57,7 +57,7 @@
 1. 运行 Harness Health Check。
 2. 运行 Quality Docs GC。
 3. 运行 Unity Asset Integrity。
-4. 人工确认 `human-checks.md` 与高风险项。
+4. 人工作答 `verification.json` 中 `role: human` 的步骤与高风险项。
 
 ## 输出约定
 
@@ -87,7 +87,7 @@
 
 - 可能改变产品行为。
 - 会修改 `openspec/specs/`。
-- 需要新增或削弱 `quality-contract.md`。
+- 需要新增或削弱 `program.md` 的约束或评估规则。
 - 涉及存档、经济、战斗、关卡加载、资源 GUID 或 Prefab 结构。
 - 需要人工 Unity 检查才能判断正确性。
 

@@ -4,7 +4,7 @@
 
 证据原则：
 
-- 变更级结论写在 `openspec/changes/<change>/verification.md`。
+- 变更级结论写在 `openspec/changes/<change>/verification.json`，由 `harness check` 写入。
 - 本目录只保存可复查的原始证据或证据索引。
 - 不用聊天记录替代证据。
 - 未覆盖的验证必须明确记录，不能用“看起来正常”代替。
