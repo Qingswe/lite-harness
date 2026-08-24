@@ -53,6 +53,11 @@
     `check-dashboard-contract.py`、`nav_tree` 与三张关系图、证据分类
     （`kind` / `source` / `date`）与 roles 档案（`harness_roles.py` +
     `.harness/roles.json` 入清单）。
+  - PR <https://github.com/Qingswe/lite-harness/pull/4>（2026-08-24）：通用
+    JSON-Schema 子集校验工具 `.harness/scripts/validate-json-schema-subset.py`
+    （`type` / `const` / `enum` / `minLength` / `pattern` / `minItems` / `items` /
+    `required` / `properties` / `additionalProperties` / 本地 `$ref`），供各采用
+    项目校验 repository-owned harness evidence JSON。
 - **采用项目专属内容会被 updater 覆盖**：`.harness/roles.json` 里的真实人名、
     `docs/knowledge/pitfalls/README.md` 里项目自己的条目，每轮更新后从
     `.harness/backups/harness-update-<时间戳>/` 恢复即可，属于预期行为，不是回归。
