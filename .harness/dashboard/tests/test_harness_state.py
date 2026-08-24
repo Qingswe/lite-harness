@@ -6,6 +6,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -62,16 +63,61 @@ class SharedImplementationTests(unittest.TestCase):
         self.assertEqual(hv.ROOT, harness_checks.ROOT)
 
     def test_both_platform_wrappers_expose_the_same_subcommands(self):
-        """两平台子命令必须一致，否则同一个 change 在两台机器上结论不同。"""
-        scripts = DASHBOARD_DIR.parent / "scripts"
-        bash = (scripts / "harness").read_text(encoding="utf-8")
-        pwsh = (scripts / "harness.ps1").read_text(encoding="utf-8")
-        for command in ("status", "ready", "next", "lint", "render", "verify",
-                        "close", "rollback", "autoclose", "sync-candidates",
-                        "reset-current"):
-            self.assertIn('"%s"' % command, pwsh,
-                          "harness.ps1 缺少子命令 %s" % command)
-            self.assertIn(command, bash, "harness 缺少子命令 %s" % command)
+        """两平台子命令必须一致，否则同一个 change 在两台机器上结论不同。
+
+        这条断言此前是**假的**：它遍历一份硬编码的子命令名单，逐个确认两边都
+        提到过。名单里没有的子命令它看不见——只往 bash 加一个 `roles` 而忘了
+        `harness.ps1`，测试照样通过。而这正是它唯一要防的那种错。
+
+        现在从两个文件各自解析出实际的分发分支再比集合。名单不再需要维护，新增
+        子命令时它自己就会发现另一边缺了什么。
+        """
+        bash_cmds = self.bash_subcommands()
+        pwsh_cmds = self.pwsh_subcommands()
+        # 先确认解析没有空转：解析不到任何分支时集合相等（空 == 空）会假绿。
+        self.assertGreaterEqual(len(bash_cmds), 8,
+                                "没能从 harness 解析出子命令：%s" % bash_cmds)
+        self.assertGreaterEqual(len(pwsh_cmds), 8,
+                                "没能从 harness.ps1 解析出子命令：%s" % pwsh_cmds)
+        self.assertEqual(
+            bash_cmds, pwsh_cmds,
+            "两个 wrapper 的子命令集合不同：\n  只在 harness: %s\n  只在 harness.ps1: %s"
+            % (sorted(bash_cmds - pwsh_cmds), sorted(pwsh_cmds - bash_cmds)))
+
+    # 帮助与别名不是子命令，两边的写法本来就不同。
+    WRAPPER_IGNORED = {"help", "--help", "-h", "*"}
+
+    def bash_subcommands(self):
+        """解析派发用的 `case` 分支标签。
+
+        不按 `case ... in` 切块：文件里有两个 case 块，前一个是选项校验
+        （`status|ready|next) ;;` 这种一行式），切错块会解析出空集。改成认分支
+        标签本身的形状——独占一行、以 `)` 收尾——恰好只命中派发块。
+        """
+        text = (SCRIPTS_DIR / "harness").read_text(encoding="utf-8")
+        found = set()
+        for line in text.splitlines():
+            m = re.match(r"^\s{2}([a-z][\w|-]*)\)\s*$", line)
+            if m:
+                found.update(m.group(1).split("|"))
+        # 透传命令（check / roles）在 case 之前就被截走，它们的参数由各自的
+        # Python 模块解析。漏掉这一类等于让整整一类子命令绕过一致性检查——
+        # `check` 此前就是这样在 PowerShell 侧缺失了很久而没人发现。
+        found.update(re.findall(r'^if \[ "\$command_name" = "([a-z][\w-]*)" \]',
+                                text, re.M))
+        return found - self.WRAPPER_IGNORED
+
+    def pwsh_subcommands(self):
+        """解析 `switch ($Command)` 里的分支标签。
+
+        分支体可以另起一行也可以写在同一行（`"reset-current" { Reset-Current }`），
+        两种都要认——只认前者会把后者报成「PowerShell 侧缺少这个子命令」。
+        """
+        text = (SCRIPTS_DIR / "harness.ps1").read_text(encoding="utf-8")
+        body = text.split("switch ($Command)", 1)
+        self.assertEqual(len(body), 2, "harness.ps1 里找不到子命令 switch 块")
+        found = set(re.findall(r'^\s{4}"([a-z][\w-]*)"\s*\{', body[1], re.M))
+        return found - self.WRAPPER_IGNORED
 
 
 class TempRepoTestCase(unittest.TestCase):

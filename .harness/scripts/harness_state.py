@@ -16,7 +16,8 @@ import os
 import re
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime
+from urllib.parse import unquote
 
 # 仓库根默认 = 本模块所在 .harness/scripts 的上两级目录，可用 configure_root() 覆盖。
 _SELF_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -217,7 +218,13 @@ def parse_verification_steps(change_id):
             "status": str(step.get("status") or "").lower(),
             "rule": step.get("rule"),
             "tasks": step.get("tasks") or [],
+            # `item` 是旧名字，前端表格还在用，保留。但 `how` / `pass_when` 必须
+            # 按记录里的原名一起带出来：投影里改了名又丢了 `how`，
+            # `hv.step_summary()` 就找不到任何字段，于是每个自动步骤都被摘要成
+            # 「该步骤未写明要求」——记录里明明写了。
             "item": step.get("pass_when") or "",
+            "how": step.get("how"),
+            "pass_when": step.get("pass_when"),
             "fail_when": step.get("fail_when"),
             "needs_human_because": step.get("needs_human_because"),
             "observe": step.get("observe"),
@@ -569,6 +576,59 @@ def list_checkpoints(change_id):
     return [rel(os.path.join(d, f)) for f in files]
 
 
+# 扩展名 → 证据类型。这张表必须是**全函数**：兜底走 `other-<ext>` 而不是
+# `unclassified`。一个「未分类」筐会立刻装进所有不好归类的东西，然后按类型筛选
+# 就永远漏——而 `other-xml` 仍然是一个确定的、可筛选的取值。
+EVIDENCE_KINDS = {
+    "image": (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"),
+    "test-result": (".json", ".xml"),
+    "log": (".log", ".txt"),
+    "doc": (".md",),
+    "script": (".py", ".ps1", ".sh"),
+}
+_EXT_TO_KIND = {ext: kind
+                for kind, exts in EVIDENCE_KINDS.items()
+                for ext in exts}
+IMAGE_EXTS = EVIDENCE_KINDS["image"]
+# 历史上证据直接平铺在 .harness/evidence/ 下，没有 change 子目录。那批文件
+# 可能仍然存在，必须有一个确定的 source 值，否则它们会从「按来源筛选」的
+# 结果里整批消失。
+LEGACY_SOURCE = "legacy-flat"
+_DATE_IN_NAME = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def evidence_kind(path):
+    """按扩展名给出证据类型。没见过的扩展名返回 other-<ext>，不返回空。"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _EXT_TO_KIND:
+        return _EXT_TO_KIND[ext]
+    return "other-%s" % (ext.lstrip(".") or "none")
+
+
+def evidence_date(full, name):
+    """证据日期：优先取文件名里的 YYYY-MM-DD，取不到退回 mtime。
+
+    不允许返回空——按月份筛选要能覆盖全集，缺一个就是一份证据从筛选里消失。
+    """
+    found = _DATE_IN_NAME.search(name)
+    if found:
+        return found.group(1)
+    return datetime.fromtimestamp(os.path.getmtime(full)).strftime("%Y-%m-%d")
+
+
+def _evidence_item(full, source):
+    name = os.path.basename(full)
+    stat = os.stat(full)
+    return {
+        "path": rel(full),
+        "size": stat.st_size,
+        "mtime": stat.st_mtime,
+        "kind": evidence_kind(name),
+        "source": source,
+        "date": evidence_date(full, name),
+    }
+
+
 def list_evidence(change_id):
     """返回该 change 的证据列表。
 
@@ -583,15 +643,185 @@ def list_evidence(change_id):
             continue
         full = os.path.join(EVIDENCE_DIR, f)
         if os.path.isfile(full):
-            out.append({"path": rel(full), "size": os.path.getsize(full)})
+            out.append(_evidence_item(full, LEGACY_SOURCE))
         elif os.path.isdir(full):
             for cur, _dirs, files in os.walk(full):
                 for name in sorted(files):
                     if name == "README.md":
                         continue
-                    inner = os.path.join(cur, name)
-                    out.append({"path": rel(inner), "size": os.path.getsize(inner)})
+                    out.append(_evidence_item(os.path.join(cur, name), f))
     return out
+
+
+def list_all_evidence():
+    """全仓库的证据，含那些不属于任何现存 change 的。
+
+    按 change 逐个调 list_evidence() 会漏掉已归档或已删除 change 留下的文件，
+    而筛选选项要覆盖磁盘上真实存在的每一份证据，所以这里直接走目录。
+    """
+    if not os.path.isdir(EVIDENCE_DIR):
+        return []
+    out = []
+    for entry in sorted(os.listdir(EVIDENCE_DIR)):
+        if entry == "README.md":
+            continue
+        full = os.path.join(EVIDENCE_DIR, entry)
+        if os.path.isfile(full):
+            out.append(_evidence_item(full, LEGACY_SOURCE))
+        elif os.path.isdir(full):
+            for cur, _dirs, files in os.walk(full):
+                for name in sorted(files):
+                    if name == "README.md":
+                        continue
+                    out.append(_evidence_item(os.path.join(cur, name), entry))
+    return out
+
+
+def evidence_references():
+    """路径 → 引用它的步骤 id 列表。
+
+    反查方向是「证据被谁引用」，因为看板要在证据旁边显示它支撑哪一步；正向的
+    「步骤引用了哪些证据」在 verification.json 里本来就有。
+
+    两处刻意的选择：
+
+    1. **走 `hv.load_verification()`，不自己 json.load。** 验证记录的解析只有
+       `harness_verification` 一份实现，本文件不得自带第二份（有测试强制这条）。
+       注意也不能用 `parse_verification_steps()`：那个投影不带 `evidence`，拿它
+       反查会稳定地得到空表——而空表和「确实没人引用」长得一模一样。
+    2. **连 archive/ 一起扫。** 证据的绝大多数引用来自已归档的 change（本仓库
+       41 条引用里 33 条在 archive 下）。只扫活动 change 会让几乎每一份历史证据
+       都显示成「无人引用」。
+    """
+    hv.configure_root(ROOT)
+    refs = {}
+    archive_dir = os.path.join(CHANGES_DIR, "archive")
+    targets = []
+    for name in sorted(existing_change_ids()):
+        targets.append((name, name))
+    if os.path.isdir(archive_dir):
+        for name in sorted(os.listdir(archive_dir)):
+            if os.path.isfile(os.path.join(archive_dir, name,
+                                           "verification.json")):
+                targets.append(("archive/" + name, name))
+    for change_ref, label in targets:
+        try:
+            data = hv.load_verification(change_ref)
+        except hv.VerificationFormatError:
+            continue
+        for step in data.get("steps") or []:
+            for path in step.get("evidence") or []:
+                refs.setdefault(path, []).append(
+                    "%s/%s" % (label, step.get("id") or "?"))
+    return refs
+
+
+def build_evidence_index():
+    """证据全集 + 三个筛选维度的取值分布。
+
+    选项从数据算，不硬编码：硬编码的选项列表在新增一类证据之后不会自己长出来，
+    那类证据就会同时不在任何选项里、也不在任何筛选结果里。
+    """
+    refs = evidence_references()
+    items = list_all_evidence()
+    for item in items:
+        item["referenced_by"] = refs.get(item["path"], [])
+    def tally(key):
+        counts = {}
+        for item in items:
+            counts[item[key]] = counts.get(item[key], 0) + 1
+        return [{"value": v, "count": counts[v]} for v in sorted(counts)]
+    return {
+        "items": items,
+        "total": len(items),
+        "kinds": tally("kind"),
+        "sources": tally("source"),
+        "months": [{"value": v, "count": c} for v, c in sorted(
+            _month_counts(items).items())],
+    }
+
+
+def _month_counts(items):
+    counts = {}
+    for item in items:
+        month = item["date"][:7]
+        counts[month] = counts.get(month, 0) + 1
+    return counts
+
+
+def build_verification_flow(change_id, steps):
+    """把验证过程投影成一张有向图：评估规则 → 步骤 → 结论。
+
+    节点与边都从既有解析结果派生，不新写一份解析：规则来自
+    `harness_verification.parse_program()`，步骤来自 `verification.json`，
+    摘要复用 `hv.step_summary()`。
+
+    每个步骤恰好产生一个节点——「流程图节点覆盖全部步骤」这条验收标准由构造
+    保证，契约脚本再把它断言一遍。
+    """
+    nodes = []
+    edges = []
+
+    try:
+        program = hv.parse_program(change_id)
+    except Exception:  # noqa: BLE001  program.md 缺失或不可解析时只画步骤
+        program = {"rules": {}, "rule_order": []}
+
+    for rule_id in program["rule_order"]:
+        nodes.append({
+            "id": "rule:" + rule_id,
+            "kind": "rule",
+            "rank": 0,
+            "label": rule_id,
+            "detail": program["rules"].get(rule_id, ""),
+            "status": None,
+        })
+
+    for step in steps:
+        step_id = str(step.get("id"))
+        role = str(step.get("role") or "").lower()
+        nodes.append({
+            "id": "step:" + step_id,
+            "kind": "step",
+            "rank": 1,
+            "label": step_id,
+            "detail": hv.step_summary(step),
+            "status": str(step.get("status") or "pending").lower(),
+            "role": role,
+            "evidence": step.get("evidence") or [],
+        })
+        rule_id = str(step.get("rule") or "").strip()
+        if rule_id:
+            # 规则可能不在 program.md 里（lint 会报 unknown）。图上仍然画出来，
+            # 否则这条步骤看起来凭空出现，而缺失恰恰是要让人看见的东西。
+            if not any(n["id"] == "rule:" + rule_id for n in nodes):
+                nodes.insert(0, {
+                    "id": "rule:" + rule_id, "kind": "rule", "rank": 0,
+                    "label": rule_id, "detail": "（program.md 里没有这条规则）",
+                    "status": None,
+                })
+            edges.append({"from": "rule:" + rule_id, "to": "step:" + step_id,
+                          "kind": "covers"})
+        edges.append({"from": "step:" + step_id, "to": "conclusion",
+                      "kind": "settles"})
+
+    settled = sum(1 for s in steps
+                  if str(s.get("status") or "").lower() in hv.TERMINAL_STATUSES)
+    nodes.append({
+        "id": "conclusion",
+        "kind": "conclusion",
+        "rank": 2,
+        "label": "归档就绪",
+        "detail": "%d / %d 步已有结论" % (settled, len(steps)),
+        "status": "passed" if steps and settled == len(steps) else "pending",
+    })
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "caption": "箭头从评估规则指向引用它的验证步骤，再从步骤指向归档结论："
+                   "规则决定一步怎么算通过，全部步骤有结论后才谈得上归档。",
+    }
 
 
 def build_change(name):
@@ -637,6 +867,7 @@ def build_change(name):
         "check_counts": check_counts,
         "human_counts": human_counts,
         "verification_error": verif_error,
+        "verification_flow": build_verification_flow(name, steps),
         "lint_problems": lint_problems,
         "task_progress": {"done": done, "total": total},
         "checkpoints": list_checkpoints(name),
@@ -664,8 +895,10 @@ def build_library():
                 out.append({"path": rel(full), "title": first_heading(full) or rel(full)})
         return out
 
+    # 四个目录都递归。`quality` 曾经是非递归的，于是 docs/quality/pitfalls/ 下
+    # 的三篇文档在看板里根本不存在——非递归的列举本身就是一处静默丢失。
     return {
-        "quality": docs_under("quality"),
+        "quality": docs_under("quality", recursive=True),
         "knowledge": docs_under("knowledge", recursive=True),
         "adr": docs_under("adr", recursive=True),
         "architecture": docs_under("architecture", recursive=True),
@@ -692,6 +925,238 @@ def parse_feature_index():
         "last_updated": data.get("last_updated"),
         "features": feats,
         "path": rel(FEATURE_INDEX),
+    }
+
+
+# --------------------------------------------------------------------------
+# 导航树
+# --------------------------------------------------------------------------
+
+# 每个 lifecycle phase 归到哪个二级分组。顺序即侧栏里的显示顺序。
+NAV_PHASE_GROUPS = (
+    ("implementing", "执行中", ("implementing",)),
+    ("awaiting_human", "待人工检查",
+     ("awaiting_human", "awaiting_human_and_user_direction")),
+    ("awaiting_user_direction", "待用户指示", ("awaiting_user_direction",)),
+    ("ready_to_close", "可关闭", ("auto_verified", "ready_to_close", "complete")),
+    ("blocked", "受阻", ("blocked",)),
+    ("planned", "已规划", ("planned",)),
+)
+
+# 知识与质量的二级分组。`docs/knowledge/` 有 46 篇，平铺在一层等于没有分层，
+# 所以按子目录拆开；拆到二级为止，再深一层树就超过三层了。
+NAV_LIBRARY_GROUPS = (
+    ("quality", "质量文档", "quality", None),
+    ("knowledge_changes", "知识库 · 变更笔记", "knowledge", "changes"),
+    ("knowledge_pitfalls", "知识库 · 坑", "knowledge", "pitfalls"),
+    ("knowledge_general", "知识库 · 综述", "knowledge", ""),
+    ("adr", "架构决策 ADR", "adr", None),
+    ("architecture", "架构", "architecture", None),
+)
+
+NAV_MAX_DEPTH = 3
+
+
+def nav_node(key, label, kind, depth, children=None, count=None, **extra):
+    """导航树的节点。
+
+    `initial_expanded` 只对分组有意义，且规则是固定的：一级分组展开，二级分组
+    收起。这样首屏能看到全部分组标题与计数（层级直接可识别），又不会把 46 篇
+    知识文档同时铺开；任何叶子最多两次点击可达。
+    """
+    node = {
+        "key": key,
+        "label": label,
+        "kind": kind,
+        "depth": depth,
+        "count": count,
+        "initial_expanded": bool(children) and depth == 1,
+        "children": children or [],
+    }
+    node.update(extra)
+    return node
+
+
+def _doc_group_children(library, source, subdir, depth):
+    """把某个文档目录下的文档取出来，按需要限定到子目录。
+
+    `subdir=""` 表示只要根目录下的，`None` 表示全部——两者不能混用，否则
+    同一篇文档会同时落进两个分组，覆盖断言就会报重复。
+    """
+    out = []
+    prefix = "docs/%s/" % source
+    for doc in library.get(source) or []:
+        rest = doc["path"][len(prefix):] if doc["path"].startswith(prefix) else ""
+        top = rest.split("/")[0] if "/" in rest else ""
+        if subdir is not None and top != subdir:
+            continue
+        out.append(nav_node(
+            "doc:" + doc["path"], doc["title"], "doc", depth,
+            doc_path=doc["path"]))
+    return out
+
+
+def build_nav_tree(changes, library, feature_index, evidence_by_change,
+                   evidence_index=None):
+    """从已经投影好的状态派生导航树。
+
+    树建在服务端而不是前端，是为了让「任意目标两次点击可达」这条验收标准能在
+    Python 里直接断言，不需要浏览器或 DOM 模拟。
+    """
+    tree = [nav_node("overview", "概览", "overview", 1)]
+
+    change_groups = []
+    for key, label, phases in NAV_PHASE_GROUPS:
+        members = [c for c in changes if c["lifecycle_phase"] in phases]
+        if not members:
+            continue
+        change_groups.append(nav_node(
+            "changes/" + key, label, "group", 2, count=len(members),
+            children=[nav_node(
+                "change:" + c["id"], c["title"], "change", 3,
+                change=c["id"],
+                dot="active" if c["is_active"] else _phase_dot(c),
+                progress=c["task_progress"]) for c in members]))
+    if change_groups:
+        tree.append(nav_node("changes", "变更", "group", 1, count=len(changes),
+                             children=change_groups))
+
+    library_groups = [nav_node(
+        "library/system", "系统结构", "system", 2)]
+    if feature_index and feature_index.get("features"):
+        library_groups.append(nav_node(
+            "library/feature_index", "能力索引", "feature_index", 2,
+            count=len(feature_index["features"])))
+    for key, label, source, subdir in NAV_LIBRARY_GROUPS:
+        docs = _doc_group_children(library, source, subdir, 3)
+        if docs:
+            library_groups.append(nav_node(
+                "library/" + key, label, "group", 2, count=len(docs),
+                children=docs))
+    if library_groups:
+        tree.append(nav_node("library", "知识与质量", "group", 1,
+                             count=sum(g["count"] or 0 for g in library_groups),
+                             children=library_groups))
+
+    # 「全部证据」是唯一能看到历史平铺那批文件的入口：它们不属于任何现存
+    # change，按 change 分组的子节点永远列不到它们。
+    total_evidence = len(evidence_index["items"]) if evidence_index else 0
+    evidence_groups = [nav_node("evidence:*", "全部证据", "evidence", 2,
+                                count=total_evidence, change=None)]
+    for change_id in sorted(evidence_by_change):
+        items = evidence_by_change[change_id]
+        if items:
+            evidence_groups.append(nav_node(
+                "evidence:" + change_id, change_id, "evidence", 2,
+                count=len(items), change=change_id))
+    if total_evidence:
+        tree.append(nav_node(
+            "evidence", "证据", "group", 1, count=total_evidence,
+            children=evidence_groups))
+
+    return tree
+
+
+def _phase_dot(change):
+    return {
+        "implementing": "active",
+        "awaiting_human": "await",
+        "awaiting_user_direction": "await",
+        "awaiting_human_and_user_direction": "await",
+        "auto_verified": "ready",
+        "ready_to_close": "ready",
+        "complete": "done",
+        "blocked": "blocked",
+    }.get(change["lifecycle_phase"], "cand")
+
+
+def build_module_graph():
+    """harness 脚本之间的依赖，从 import 语句派生。
+
+    手绘的架构图会漂移，而漂移的图比没有图更糟——它让人对着一个不再成立的结构
+    做决定。所以边集直接由 `ast` 解析出来，图和实现不可能对不上。
+    """
+    import ast
+
+    sources = {}
+    scripts_dir = os.path.join(ROOT, ".harness", "scripts")
+    if os.path.isdir(scripts_dir):
+        for name in sorted(os.listdir(scripts_dir)):
+            if name.endswith(".py"):
+                sources[name[:-3]] = os.path.join(scripts_dir, name)
+    server_py = os.path.join(ROOT, ".harness", "dashboard", "server.py")
+    if os.path.isfile(server_py):
+        sources["server"] = server_py
+
+    nodes = {}
+    edges = []
+    for module, path in sources.items():
+        try:
+            tree = ast.parse(read_text(path)[0])
+        except (SyntaxError, OSError):
+            continue
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        nodes[module] = {
+            "id": module, "kind": "module", "label": module,
+            "detail": rel(path), "rank": 0, "status": None,
+        }
+        for target in sorted(imported):
+            if target in sources and target != module:
+                edges.append({"from": module, "to": target, "kind": "imports"})
+
+    # 被依赖得越多排得越靠右，读起来是「上层 → 底层」。
+    incoming = {}
+    for edge in edges:
+        incoming[edge["to"]] = incoming.get(edge["to"], 0) + 1
+    for module, node in nodes.items():
+        node["rank"] = 1 if incoming.get(module) else 0
+        node["detail"] = "%s · 被 %d 个模块依赖" % (
+            node["detail"], incoming.get(module, 0))
+
+    return {
+        "nodes": sorted(nodes.values(), key=lambda n: (n["rank"], n["id"])),
+        "edges": edges,
+        "caption": "箭头从 A 指向 B 表示 A 直接 import 了 B，也就是 A 依赖 B 的"
+                   "实现。右列是被依赖的底层模块。",
+    }
+
+
+def build_dependency_graph(changes, contexts):
+    """change 之间的归档依赖，来自 change_context 里声明的 depends_on。"""
+    nodes = []
+    edges = []
+    known = {c["id"] for c in changes}
+    for change in changes:
+        nodes.append({
+            "id": change["id"], "kind": "change", "label": change["id"],
+            "detail": "%s · 任务 %d/%d" % (
+                change["lifecycle_phase"],
+                change["task_progress"]["done"], change["task_progress"]["total"]),
+            "rank": 0, "status": None,
+        })
+    for change in changes:
+        context = contexts.get(change["id"])
+        depends = (context or {}).get("depends_on") or [] \
+            if isinstance(context, dict) else []
+        for target in depends:
+            if target in known:
+                edges.append({"from": target, "to": change["id"],
+                              "kind": "blocks"})
+    for edge in edges:
+        for node in nodes:
+            if node["id"] == edge["to"]:
+                node["rank"] = 1
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "caption": "箭头从 A 指向 B 表示 A 必须先归档，B 才能归档。没有箭头的 "
+                   "change 之间没有归档顺序要求。",
     }
 
 
@@ -756,6 +1221,11 @@ def build_state():
     def queue_ids(*phases):
         return [c["id"] for c in changes if c["lifecycle_phase"] in phases]
 
+    library = build_library()
+    feature_index = parse_feature_index()
+    evidence_by_change = {c["id"]: c["evidence"] for c in changes}
+    evidence_index = build_evidence_index()
+
     return {
         "current": {
             "schema_version": current.get("schema_version"),
@@ -790,8 +1260,15 @@ def build_state():
             ],
         },
         "changes": changes,
-        "library": build_library(),
-        "feature_index": parse_feature_index(),
+        "library": library,
+        "feature_index": feature_index,
+        "evidence_index": evidence_index,
+        "nav_tree": build_nav_tree(changes, library, feature_index,
+                                   evidence_by_change, evidence_index),
+        "graphs": {
+            "dependency": build_dependency_graph(changes, contexts),
+            "modules": build_module_graph(),
+        },
         "statuses": list(HUMAN_STATUSES),
         "root": ROOT,
     }
@@ -829,6 +1306,19 @@ def toggle_task(change_id, line_no, checked, expected):
     return True, lines[line_no]
 
 
+def _fallback_operator(change_id, step_id):
+    """按步骤的 role 从角色档案取 operator。取不到就返回空，不猜。"""
+    try:
+        import harness_roles
+        harness_roles.configure_root(ROOT)
+        data = hv.load_verification(change_id)
+        step = hv.find_step(data, step_id) or {}
+        return harness_roles.resolve(step.get("role"))
+    except Exception:  # noqa: BLE001
+        # 角色档案坏了不该让写回失败——它只是个填表模板。
+        return ""
+
+
 def update_verification_step(change_id, step_id, status, operator, date_value,
                              notes, expected, evidence=None):
     """按 step id 寻址写入验证结论。
@@ -838,6 +1328,14 @@ def update_verification_step(change_id, step_id, status, operator, date_value,
     """
     require_change_exists(change_id)
     hv.configure_root(ROOT)
+    # 服务端兜底：operator 为空时按步骤的 role 从激活档案取。前端也会预填，但
+    # 兜底必须在这里，否则「直接 POST {change, step, status}」就会写出一条没有
+    # 操作者的结论。date 的兜底由 hv.set_step() 已有的 `or date.today()` 负责。
+    #
+    # 注意这里补的只是 operator（一个人名）。`evaluated_by` 从头到尾不经过这条
+    # 路径——看板写不出非 human 的评估者身份，见 harness_roles.py 的模块说明。
+    if not (operator or "").strip():
+        operator = _fallback_operator(change_id, step_id) or operator
     try:
         hv.set_step(change_id, step_id, status, operator=operator,
                     date_value=date_value, note=notes, evidence=evidence,
@@ -849,26 +1347,64 @@ def update_verification_step(change_id, step_id, status, operator, date_value,
     return True, status
 
 
-def read_doc(relpath):
-    """读取一个被白名单允许的文档，返回纯文本。"""
+def _resolve_allowed(relpath, roots=None):
+    """把相对路径解析成绝对路径，并确认它落在白名单内。
+
+    读文件的入口有两个（文档预览与证据文件），它们必须共用这一份校验。写第二份
+    等于给自己安排一次分叉，而分叉出来的那一份就是漏洞——两处只要有一处漏了
+    「先解码再判定」或漏了 realpath，越界就成立。
+
+    `roots` 为 None 时用 DOC_ALLOW；传入更窄的集合可以进一步收紧（证据端点只
+    允许 EVIDENCE_DIR）。
+    """
     if not relpath:
         raise ValueError("缺少 path")
-    full = os.path.normpath(os.path.join(ROOT, relpath))
-    if os.path.commonpath([full, ROOT]) != os.path.normpath(ROOT):
+    # 先解码：`%2e%2e%2f` 这类编码过的穿越如果不解码就判定，只会因为「文件不
+    # 存在」而恰好失败，白名单本身并没有拦住它。
+    relpath = unquote(relpath)
+    if os.path.isabs(relpath):
+        raise ValueError("只接受仓库内的相对路径")
+    # realpath 而不是 normpath：normpath 只做字符串折叠，跟不进软链。证据目录
+    # 里放一个指向 /etc 的软链，normpath 判定会通过。
+    root_real = os.path.realpath(ROOT)
+    full = os.path.realpath(os.path.join(ROOT, relpath))
+    if full != root_real and os.path.commonpath([full, root_real]) != root_real:
         raise ValueError("路径越界")
     allowed = False
-    for prefix in DOC_ALLOW:
+    for prefix in (roots if roots is not None else DOC_ALLOW):
+        prefix = os.path.realpath(prefix)
         if full == prefix:
             allowed = True
             break
-        if os.path.isdir(prefix) and os.path.commonpath([full, prefix]) == prefix:
+        if os.path.isdir(prefix) and \
+                os.path.commonpath([full, prefix]) == prefix:
             allowed = True
             break
     if not allowed:
-        raise ValueError("不在允许预览的目录内")
+        raise ValueError("不在允许读取的目录内")
     if not os.path.isfile(full):
         raise FileNotFoundError(full)
-    text, _ = read_text(full)
+    return full
+
+
+def read_evidence_bytes(relpath):
+    """读取一份证据的原始字节，返回 (bytes, 扩展名)。
+
+    白名单比 read_doc 更窄：只有 .harness/evidence/ 下的文件。证据端点返回原始
+    字节且带 Content-Type，把它的可读范围放宽到 DOC_ALLOW 等于让整个 docs/ 与
+    openspec/ 都能被当作任意类型下载。
+    """
+    full = _resolve_allowed(relpath, roots=(EVIDENCE_DIR,))
+    with open(full, "rb") as fh:
+        return fh.read(), os.path.splitext(full)[1].lower()
+
+
+def read_doc(relpath):
+    """读取一个被白名单允许的文档，返回纯文本。
+
+    路径校验委派 `_resolve_allowed()`——本文件只有那一处做越界判定。
+    """
+    text, _ = read_text(_resolve_allowed(relpath))
     return text
 
 

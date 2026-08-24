@@ -25,3 +25,19 @@ checkpoint 只记录下一轮恢复所需的信息：
 - 重要但尚未验证的假设
 
 不要在这里复制 `openspec/specs/`、`proposal.md` 或 `tasks.md` 的完整内容。
+
+## 2026-07-30 之前的检查点
+
+那之前的检查点会提到 `human-checks.md`、`quality-contract.md`、`verification.md`。
+这三份文件已被 `simplify-harness-change-artifacts` 合并为 `program.md` 与
+`verification.json`，对应关系：
+
+| 旧文件 | 现在在哪 |
+| --- | --- |
+| `quality-contract.md` | `program.md` |
+| `verification.md` 的验证记录 | `verification.json` 中 `role: evaluator` 的步骤 |
+| `human-checks.md` 的检查项 | `verification.json` 中 `role: human` 的步骤 |
+| 两者没有结构化归宿的小节 | `verification.json` 的 `migrated_sections`（原文保留） |
+
+**检查点不回溯改写。** 它们是某个时点的交接记录，改掉就不再是当时发生的事——
+与 `openspec/changes/archive/` 同理。读旧检查点时按上表换算即可。

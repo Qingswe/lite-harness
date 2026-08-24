@@ -34,6 +34,7 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 import harness_checks  # noqa: E402
+import harness_roles  # noqa: E402
 import harness_state  # noqa: E402
 from harness_state import (  # noqa: E402
     StateConflict,
@@ -54,6 +55,133 @@ def __getattr__(name):
     且取到的是状态层的实时值而不是导入时的快照。
     """
     return getattr(harness_state, name)
+
+
+# --------------------------------------------------------------------------
+# 数据流声明
+# --------------------------------------------------------------------------
+
+# 每个 route 读写哪些文件。这是数据流图的唯一来源，也是唯一一份需要人写的
+# 图数据——所以配一条防漂移断言：`check-dashboard-contract.py graphs` 会核对
+# 已注册的 route 是否都在这里登记，新增 route 忘了登记就会失败。
+# 「记得更新图」于是从纪律变成门槛。
+DATA_FLOW = (
+    {"route": "/api/state", "method": "GET",
+     "reads": [".harness/current.json", "openspec/changes/",
+               ".harness/feature-index.json", "docs/", ".harness/evidence/"],
+     "writes": []},
+    {"route": "/api/ready", "method": "GET",
+     "reads": [".harness/current.json", "openspec/changes/"],
+     "writes": []},
+    {"route": "/api/doc", "method": "GET",
+     "reads": ["openspec/changes/", ".harness/checkpoints/",
+               ".harness/evidence/", "docs/", ".harness/feature-index.json"],
+     "writes": []},
+    {"route": "/api/evidence-file", "method": "GET",
+     "reads": [".harness/evidence/"],
+     "writes": []},
+    {"route": "/api/roles", "method": "GET",
+     "reads": [".harness/roles.json"],
+     "writes": [".harness/roles.json"]},
+    {"route": "/api/task", "method": "POST",
+     "reads": ["openspec/changes/"],
+     "writes": ["openspec/changes/"]},
+    {"route": "/api/verification-step", "method": "POST",
+     "reads": ["openspec/changes/"],
+     "writes": ["openspec/changes/"]},
+    {"route": "/api/current", "method": "POST",
+     "reads": [".harness/current.json", "openspec/changes/"],
+     "writes": [".harness/current.json"]},
+)
+
+
+def data_flow_graph():
+    """把 DATA_FLOW 投影成一张有向图：文件 → route → 文件。"""
+    nodes = {}
+    edges = []
+
+    def add(node_id, kind, label, detail, rank):
+        nodes.setdefault(node_id, {
+            "id": node_id, "kind": kind, "label": label,
+            "detail": detail, "rank": rank, "status": None})
+
+    for entry in DATA_FLOW:
+        route_id = "route:" + entry["route"]
+        add(route_id, "route", entry["route"],
+            entry["method"] + " 端点", 1)
+        for path in entry["reads"]:
+            add("file:" + path, "file", path, "仓库里的文件或目录", 0)
+            edges.append({"from": "file:" + path, "to": route_id,
+                          "kind": "reads"})
+        for path in entry["writes"]:
+            add("sink:" + path, "file", path, "被写回的文件", 2)
+            edges.append({"from": route_id, "to": "sink:" + path,
+                          "kind": "writes"})
+
+    return {
+        "nodes": sorted(nodes.values(), key=lambda n: (n["rank"], n["id"])),
+        "edges": edges,
+        "caption": "箭头从文件指向端点表示该端点读它；从端点指向文件表示该端点"
+                   "写它。左列是数据来源，右列是会被改动的文件。",
+    }
+
+
+def registered_routes():
+    """从 do_GET / do_POST 的源码里取出实际注册的 route。
+
+    从源码取而不是维护第二份清单：两份清单会分叉，而分叉的那一刻正是防漂移
+    断言应该报警的时刻。
+    """
+    import inspect
+    import re as _re
+    found = set()
+    for handler in (Handler.do_GET, Handler.do_POST):
+        source = inspect.getsource(handler)
+        found.update(_re.findall(r'["\'](/api/[\w-]+)["\']', source))
+    return found
+
+
+# --------------------------------------------------------------------------
+# 静态资源
+# --------------------------------------------------------------------------
+
+# 前端拆成了多个文件，需要一条静态路由。它的白名单**比 /api/doc 更窄**：只认
+# WEB_DIR 下不含路径分隔符的这两种扩展名。刻意不复用 DOC_ALLOW——那份白名单
+# 服务于文档预览，把它扩到能读脚本目录等于把 .harness/scripts/ 也变成可下载。
+STATIC_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+}
+
+# 证据文件按扩展名映射 Content-Type。没登记的扩展名一律按 octet-stream 下发，
+# 不猜——猜错的那次就是让浏览器把一个 .log 当 text/html 解析。
+EVIDENCE_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".json": "application/json; charset=utf-8",
+    ".xml": "application/xml; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".log": "text/plain; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+}
+
+
+def resolve_static(path):
+    """把 URL 路径解析为 WEB_DIR 下的静态文件，非法则返回 None。"""
+    from urllib.parse import unquote
+    # 先解码再校验：否则 %2e%2e%2f 这种编码过的穿越只会因为「文件不存在」而
+    # 恰好失败，白名单本身并没有拦住它。
+    name = unquote(path).lstrip("/")
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return None
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in STATIC_TYPES:
+        return None
+    full = os.path.join(WEB_DIR, name)
+    if not os.path.isfile(full):
+        return None
+    return full, STATIC_TYPES[ext]
 
 
 # --------------------------------------------------------------------------
@@ -80,6 +208,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, body, content_type):
+        """下发原始字节。
+
+        两个安全头是承重的，不是装饰：
+        - nosniff 阻止浏览器忽略 Content-Type 去猜内容类型；
+        - CSP default-src 'none' 保证即便某份证据真的被当成文档解析，它也拿不到
+          任何外部能力。证据是脚本写出来的，而脚本的输入未必都是自己产的。
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _read_body(self):
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
@@ -91,6 +236,10 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path in ("/", "/index.html"):
             self._send_file(os.path.join(WEB_DIR, "index.html"), "text/html; charset=utf-8")
+            return
+        static = resolve_static(parsed.path)
+        if static:
+            self._send_file(*static)
             return
         if parsed.path == "/api/ready":
             try:
@@ -105,7 +254,43 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/state":
             try:
-                self._send_json(build_state())
+                state = build_state()
+                # 数据流图的来源在 HTTP 层，所以在这里并进状态投影，而不是让
+                # 状态层去猜有哪些 route。
+                state["graphs"]["data_flow"] = data_flow_graph()
+                # 角色档案随状态一起下发：前端每渲染一个步骤行都要用它预填
+                # operator，单开一次请求只是多一个可失败的时点。
+                harness_roles.configure_root(harness_state.ROOT)
+                try:
+                    state["roles"] = harness_roles.load()
+                except harness_roles.RoleError as exc:
+                    # 档案坏了不该让整个看板打不开——它只是填表模板。
+                    state["roles"] = {"error": str(exc), "profiles": []}
+                self._send_json(state)
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, 500)
+            return
+        if parsed.path == "/api/evidence-file":
+            qs = parse_qs(parsed.query)
+            relpath = (qs.get("path") or [""])[0]
+            try:
+                body, ext = harness_state.read_evidence_bytes(relpath)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except FileNotFoundError:
+                self._send_json({"error": "文件不存在"}, 404)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, 500)
+                return
+            self._send_bytes(body, EVIDENCE_TYPES.get(
+                ext, "application/octet-stream"))
+            return
+        if parsed.path == "/api/roles":
+            try:
+                harness_roles.configure_root(harness_state.ROOT)
+                self._send_json(harness_roles.load())
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": str(exc)}, 500)
             return
@@ -149,6 +334,20 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "conflict", "current": current}, 409)
                     return
                 self._send_json({"ok": True, "status": current})
+                return
+            if self.path == "/api/roles":
+                # 只允许切换激活档案。这里刻意不提供「任意写入档案」的入口：
+                # 档案编辑走 `harness roles set`，看板只做选择。
+                harness_roles.configure_root(harness_state.ROOT)
+                if payload.get("action") != "use":
+                    self._send_json({"error": "只支持 action=use"}, 400)
+                    return
+                try:
+                    state = harness_roles.use(payload.get("profile"))
+                except harness_roles.RoleError as exc:
+                    self._send_json({"error": str(exc)}, 400)
+                    return
+                self._send_json({"ok": True, "roles": state})
                 return
             if self.path == "/api/current":
                 current = update_current_state(payload["action"], payload.get("change"))
