@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "active_profile": "human-owner",
+  "profiles": [
+    {
+      "id": "human-owner",
+      "label": "仓库所有者（人工）",
+      "role": "human",
+      "operator": "owner",
+      "note_template": ""
+    },
+    {
+      "id": "evaluator-agent",
+      "label": "Evaluator Agent",
+      "role": "evaluator",
+      "operator": "harness-evaluator",
+      "note_template": "证据：.harness/evidence/<change>/"
+    },
+    {
+      "id": "external",
+      "label": "外部工具",
+      "role": "external",
+      "operator": "",
+      "note_template": ""
+    }
+  ]
+}

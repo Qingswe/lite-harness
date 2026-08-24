@@ -11,7 +11,12 @@ param(
 
     [switch]$NoProbe,
 
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    # check 与 roles 是透传命令：它们的参数契约由 harness_verification.py /
+    # harness_roles.py 拥有，在 wrapper 里再解析一遍等于维护第二份。
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Rest
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +32,8 @@ function Show-Usage {
     Write-Output "  .\.harness\scripts\harness.ps1 rollback <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 lint <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 render <change>"
+    Write-Output "  .\.harness\scripts\harness.ps1 check <change> <step> <status> [--by <who>]"
+    Write-Output "  .\.harness\scripts\harness.ps1 roles [list|use <id>|set <id> --operator <name>]"
     Write-Output "  .\.harness\scripts\harness.ps1 sync-candidates"
     Write-Output "  .\.harness\scripts\harness.ps1 verify <change> [-NoProbe]"
     Write-Output "  .\.harness\scripts\harness.ps1 close <change> [-SkipSpecs] [-NoProbe]"
@@ -302,6 +309,21 @@ function Reset-Current {
     Invoke-StateCommand @("reset-current")
 }
 
+function Invoke-CheckStep([string[]]$Args) {
+    # 按 step id 写入验证结论，格式由命令保证。与 bash 侧同一份实现。
+    $Python = Resolve-Python
+    & $Python (Join-Path $PSScriptRoot "harness_verification.py") set @Args
+    if ($LASTEXITCODE -ne 0) { Fail "check failed." }
+}
+
+function Invoke-Roles([string[]]$Args) {
+    # 角色档案只提供 operator 与备注模板；它不写 evaluated_by，也写不了。
+    $Python = Resolve-Python
+    if (-not $Args -or $Args.Count -eq 0) { $Args = @("list") }
+    & $Python (Join-Path $PSScriptRoot "harness_roles.py") @Args
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 function Sync-Candidates {
     Invoke-StateCommand @("sync-candidates")
 }
@@ -388,6 +410,22 @@ switch ($Command) {
         Sync-Candidates
     }
     "reset-current" { Reset-Current }
+    "check" {
+        $CheckArgs = @()
+        if ($Change) { $CheckArgs += $Change }
+        if ($Rest) { $CheckArgs += $Rest }
+        if ($CheckArgs.Count -lt 3) {
+            Show-Usage
+            Fail "check requires <change> <step> <status>."
+        }
+        Invoke-CheckStep $CheckArgs
+    }
+    "roles" {
+        $RoleArgs = @()
+        if ($Change) { $RoleArgs += $Change }
+        if ($Rest) { $RoleArgs += $Rest }
+        Invoke-Roles $RoleArgs
+    }
     { $_ -in @("help", "--help", "-h") } { Show-Usage }
     default {
         Show-Usage

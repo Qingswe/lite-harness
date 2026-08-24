@@ -22,6 +22,7 @@ usage() {
   .harness/scripts/harness verify <change> [--no-probe]
   .harness/scripts/harness close <change> [--skip-specs] [--no-probe]
   .harness/scripts/harness reset-current
+  .harness/scripts/harness roles [list|use <id>|set <id> --operator <名>]
 
 说明:
   status 一次输出会话恢复所需的执行状态：active 槽、候选 change 与 lifecycle
@@ -152,6 +153,11 @@ next_action() {
 check_step() {
   # 按 step id 写入验证结论，格式由命令保证。
   "$(resolve_python)" .harness/scripts/harness_verification.py set "$@"
+}
+
+roles_cmd() {
+  # 角色档案只提供 operator 与备注模板；它不写 evaluated_by，也写不了。
+  "$(resolve_python)" .harness/scripts/harness_roles.py "${@:-list}"
 }
 
 render_verification() {
@@ -302,6 +308,12 @@ shift || true
 if [ "$command_name" = "check" ]; then
   [ "$#" -ge 3 ] || { usage; fail "check 需要 <change> <step> <status>"; }
   check_step "$@"
+  exit $?
+fi
+
+# roles 同理透传给 harness_roles.py。
+if [ "$command_name" = "roles" ]; then
+  roles_cmd "$@"
   exit $?
 fi
 

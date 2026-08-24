@@ -40,4 +40,4 @@ docs/agents/
 - 只有低风险、范围很窄、验证路径清楚的问题，才允许自动创建重构 PR。
 - 如果问题会改变产品行为、规格事实或质量契约，必须先创建 OpenSpec candidate change。
 - 所有自动化输出都必须写入可审查位置，例如 `.harness/evidence/agent-gc/<date>/`、`docs/quality/` 或新的 OpenSpec change。
-- 定时任务不得直接运行 `openspec archive`；close 仍由人工明确触发 `.harness/scripts/harness close <change>`。
+- 定时任务不得直接运行 `openspec archive`；归档一律走 `.harness/scripts/harness close <change>`，并由就绪度驱动（见 `.harness/program.md`）。定时任务本身不得代答 `role: human` 步骤。
