@@ -1,5 +1,11 @@
 # Quality Docs Update Policy
 
+## 适用范围
+
+日常协作仅在长期质量、债务、风险或经验发生变化时更新对应文档；证据可以引用测试输出、CI、提交或 PR，无需创建 `verification.json` 或运行预筛。没有长期变化时不写“无需更新”。
+
+以下预筛写入、JSON 字段和 close 门槛仅适用于自动循环。已进入循环的 change 继续遵守，不因日常流程可选而豁免。
+
 `docs/quality/` 记录长期质量状态，不记录单次变更的完整验证日志。单次变更的命令、结果和证据仍写在 `openspec/changes/<change>/verification.json`。
 
 每次 `harness close <change>` 前，必须先跑一次机器预筛：

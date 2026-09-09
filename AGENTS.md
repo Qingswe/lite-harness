@@ -1,24 +1,9 @@
 # AGENTS.md
 
-这个仓库面向长时运行的 coding agent 工作流，目标平台是 Unity（C#）。目标不是尽快产出代码，而是让每一轮会话结束后，下一轮仍然能无猜测地继续。
+完整的 agent 工作规则以根目录 [CLAUDE.md](CLAUDE.md) 为唯一权威源，适用于所有 coding agent。
 
-## 规则在哪里
+默认使用日常协作：确认目标、实现、验证和提交。无需为普通任务创建 OpenSpec change、选择 active 执行槽或更新 `current.json`。
 
-**完整的 agent 工作规则以根目录 `CLAUDE.md` 为唯一权威源**，适用于所有 coding agent，不限于 Claude Code。开工前必须读它，内容包括：
+接续已有 OpenSpec change 或用户要求自动循环时，按 `CLAUDE.md` 的自动循环规则执行。已有规格、质量契约和人工检查不能因流程选择而绕过。
 
-- 权威来源链与"一种信息只能有一个权威来源"原则
-- 固定工作循环（`pwd` → `harness status` → 读 active change 的设计与任务 → 架构与质量文档 → 按契约决定环境探针）
-- 工作规则：唯一 active 执行槽、候选 change 的边界、证据纪律、归档必须经 `harness close`
-- 必需文件清单
-- 完成门槛与结束前的收尾步骤
-
-本文件不复制这些条目。若两者出现分歧，以 `CLAUDE.md` 为准，并把分歧当作待修的漂移处理。
-
-## 起步
-
-```bash
-pwd
-.harness/scripts/harness status
-```
-
-其余步骤见 `CLAUDE.md` 的「固定工作循环」。
+开工先读 `CLAUDE.md`，确认目录和 Git 状态；自动循环另用 `harness status` 恢复状态。

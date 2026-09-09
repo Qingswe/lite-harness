@@ -30,7 +30,7 @@
 每个定时 Codex 任务都应该配置这些输入：
 
 - 工作目录：目标项目根目录。
-- 基础指令：遵守 `AGENTS.md` / `CLAUDE.md`，先读取 `.harness/current.json`，运行 `openspec list` 和平台探针。
+- 基础指令：遵守 `AGENTS.md` / `CLAUDE.md`，先检查 Git 与相关交接；涉及自动循环时运行 `harness status`，需要 Unity 验证时才运行平台探针。
 - Prompt：复制 `docs/agents/prompts/<task>.md` 中的完整 Prompt。
 - 输出目录：`.harness/evidence/agent-gc/<YYYY-MM-DD>/<task>/`。
 - 分支策略：需要改文件时使用 `codex/gc-<task>-<YYYYMMDD>`。
@@ -81,9 +81,9 @@
 - 是否创建 PR 或 OpenSpec candidate change。
 - 剩余风险和需要人工判断的内容。
 
-## 何时创建 OpenSpec candidate change
+## 何时先提出设计建议
 
-满足任一条件时，不要直接发重构 PR，应先创建 candidate change：
+满足任一条件时，不要直接扩大重构 PR，应先报告并提出设计建议；已有 OpenSpec 范围按 change 流程处理，其他任务按需要选择设计载体：
 
 - 可能改变产品行为。
 - 会修改 `openspec/specs/`。

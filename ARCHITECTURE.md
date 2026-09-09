@@ -7,8 +7,8 @@
 - 产品：`[替换成产品名]`
 - 主用户流程：`[替换成核心流程]`
 - 运行面：`[desktop / web / cli / services / workers]`
-- 产品行为真相来源：`openspec/specs/`
-- 变更设计来源：`openspec/changes/<change>/design.md`
+- 产品行为约定入口：`[项目现有产品文档路径；采用 OpenSpec 时为 openspec/specs/]`
+- 变更设计来源：`[项目现有设计文档路径；自动循环使用 openspec/changes/<change>/design.md]`
 
 ## 领域地图
 
@@ -32,7 +32,7 @@
 - 场景和 Prefab 不能承载隐式业务规则；规则应进入可测试的 C# 层或 ScriptableObject 配置。
 - 存档、资源加载和外部系统必须通过明确 adapter 进入。
 - 共享 util 必须保持通用，不能慢慢堆成领域逻辑垃圾桶。
-- 新依赖要在对应 OpenSpec change 的 `design.md` 里说明理由。
+- 新依赖在相关设计文档说明理由；长期有效的决策放入 `docs/adr/`。自动循环沿用对应 change 的 `design.md`。
 
 ## 横切接口
 
@@ -53,5 +53,5 @@
 当你修改了会影响架构的代码：
 
 1. 如果领域地图或允许边界变了，就更新这份文件。
-2. 如果背后的设计理由变了，就更新对应 OpenSpec change 的 `design.md`；长期有效的决策归档到 `docs/adr/`。
+2. 如果背后的设计理由变了，就更新相关设计文档（自动循环为对应 change 的 `design.md`）；长期有效的决策归档到 `docs/adr/`。
 3. 如果规则应该机械执行，就补一个可执行检查。

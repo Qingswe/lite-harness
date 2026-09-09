@@ -1,13 +1,18 @@
-# 干净状态检查清单
+# 收尾自查（按任务取用）
 
-- [ ] 标准启动路径仍然可用
-- [ ] 标准验证路径仍然可运行
-- [ ] `.harness/current.json` 已记录唯一 active change、候选 change、当前 task、blocker 和 next action
-- [ ] 候选 change 没有修改实现代码、当前产品事实或最终验证结论
-- [ ] 需要交接时已生成 `.harness/checkpoints/<change>/<YYYYMMDD>[-<label>].md`（目录名是 canonical change id，不带摘要）
-- [ ] `.harness/feature-index.json` 只作为能力索引，没有复制任务和证据；`sync-feature-index.py --check` 通过
-- [ ] `.harness/scripts/harness lint <change>` 通过（它已机械覆盖：必需文件、任务完成度、验证记录终态、证据路径存在、规则覆盖、风险下限、角色隔离、质量文档预筛）
-- [ ] `verification.json` 中没有由 AI 代答的 `role: human` 步骤——这一条机器判不了，只能靠人自己守
-- [ ] 没有任何半成品步骤处于未记录状态
-- [ ] 变更完成时通过 `.harness/scripts/harness close <change>` 归档，没有直接运行 `openspec archive`
-- [ ] 下一轮会话无需人工修复即可继续
+## 日常协作
+
+- 目标已实现，实际验证结果与未验证部分已如实说明。
+- 用户已有修改已保留，本次提交范围清晰，Unity 资源与 `.meta` 一起提交。
+- 未完成且需要交接时，已记录无法从 Git 恢复的约束、阻塞与下一步。
+- 架构、长期质量、风险或经验变化时，已更新对应文档。
+
+无需为这份自查创建 current、OpenSpec 或固定验证报告。
+
+## 自动循环补充
+
+- 状态由现有工具维护，候选与 active 的边界、角色隔离仍然成立。
+- 需要交接时使用 `.harness/checkpoints/<change>/<YYYYMMDD>[-<label>].md`。
+- `harness lint <change>` 通过，共享门槛检查任务、证据、规则覆盖、角色隔离和质量预筛。
+- 没有由 AI 代答的人工步骤，未完成项仍然阻塞。
+- 就绪后经 `harness autoclose` / `close` 归档，保留回滚点；不直接 archive。

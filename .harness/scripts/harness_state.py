@@ -1670,7 +1670,7 @@ def format_status(status):
         add("  证据: %d 份 | pending 人工检查: %d" % (
             active["evidence_count"], active["pending_checks"]))
     else:
-        add("Active 执行槽: 空（进入实现前必须先选定唯一 active change）")
+        add("Active 执行槽: 空（日常协作无需执行槽；自动循环实现前须选定 active change）")
     if status["current_task"]:
         add("当前 task: %s" % status["current_task"])
     if status["next_action"] and not active:

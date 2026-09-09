@@ -1,116 +1,43 @@
-# 模板使用指南（Unity 版）
+# 模板使用指南
 
-这套模板专为 Unity（C# + Unity Test Framework）项目准备。它的目标不是增加文档数量，而是建立一条清晰的权威来源链：
+工作规则以根目录 `CLAUDE.md` 为唯一权威源。本指南说明工具选择和文件用途。
 
-```text
-项目原则 -> 当前产品事实 -> 变更设计 -> 执行状态 -> 验证证据 -> 知识归档
-```
+## 默认：日常协作
 
-分工：**OpenSpec 负责 WHAT**（产品行为、变更提案、任务清单、归档后的当前事实）；**Harness 负责运行态和证据**（当前恢复点、checkpoint、质量契约、验证证据、人工检查、收尾命令）。
+复制模板并合并项目规则，填写 `ARCHITECTURE.md`，确认本次目标和验证方式即可开始。无需 OpenSpec 初始化、active 执行槽、verification JSON 或每轮更新 current。
 
-本文件只说明**每个文件是什么、放什么**。工作规则、权威来源链、工作循环、完成门槛和收尾步骤都以根目录 `CLAUDE.md` 为唯一权威源，这里不复制。
+局部修复直接实现和验证；复杂行为先用项目已有设计文档澄清目标、非目标和验收。代码和测试描述实际实现，产品约定只维护一份，从架构入口链接。CI、测试输出和 PR 已有证据直接引用。
 
-> 前提：本机已通过 Unity Hub 安装并激活目标 Unity 版本，项目已添加 Unity Test Framework 包，并有 EditMode / PlayMode 测试 assembly。
+## 跨会话交接
 
-## 推荐目录
+仅为未完成且需要继续的工作创建 `.harness/checkpoints/<topic>/<YYYYMMDD>[-<label>].md`，从 `.harness/templates/checkpoint.md` 取用相关项。记录难以重建的约束、决定、失败尝试、阻塞和下一步。不要复制 Git 文件清单或任务表；完成后标记已完成，长期结论移入 ADR 或知识文档，旧时点记录不回溯改写。
 
-```text
-/
-├── AGENTS.md
-├── CLAUDE.md
-├── ARCHITECTURE.md
-├── init.ps1
-├── init.sh
-├── openspec/
-├── .harness/
-│   ├── current.json
-│   ├── feature-index.json
-│   ├── checkpoints/
-│   ├── evidence/
-│   ├── templates/
-│   └── scripts/
-└── docs/
-    ├── architecture/
-    ├── adr/
-    ├── agents/
-    ├── quality/
-    └── knowledge/
-```
+日常 topic 是稳定的任务名，不必对应 OpenSpec change。自动循环仍使用 canonical change id 作为目录名，供看板定位。日常交接直接读文件，无需看板索引。
 
-## 初始化
+## 可选：自动循环
 
-1. 在项目根目录运行 `openspec init`，初始化 OpenSpec。
-2. 根据项目实际情况填写 `.harness/current.json` 和 `ARCHITECTURE.md`。
-3. 为第一个候选变更创建 `openspec/changes/<change>/`，至少包含 `proposal.md`、`tasks.md` 和 spec 增量草案。
-4. 选定 active change 后，从 `.harness/templates/` 复制 `program.md` 与 `verification.json`。
+需要队列调度、独立评估和自动归档时，安装 OpenSpec CLI 并执行 `openspec init`。为候选 change 准备 proposal、必要的 design、spec 增量和 tasks，从 `.harness/templates/` 准备 `program.md` 与 `verification.json`。按 `CLAUDE.md` 和 `.harness/program.md` 执行。
 
-日常工作循环见 `CLAUDE.md`。
+- `harness status`：恢复状态、漂移与近期提交；`sync-candidates` 从实际目录同步候选集合。
+- `harness next`：给客户端下一项任务与角色；状态由脚本计算，客户端不重复推导。
+- `harness check` / `render`：记录评估结论 / 渲染供人阅读，事实来源为 JSON。
+- `harness ready` / `lint`：就绪度与完整门槛；`verify` 检查规格、结构并按契约决定 Unity 探针。
+- `harness autoclose` / `close`：通过完整门槛和回滚点后归档；`rollback` 恢复归档前状态。
 
-## 关键文件
+Unix 入口为 `.harness/scripts/harness`，Windows 为 `.harness/scripts/harness.ps1`，具体参数见各自 help。日常协作不调用这些归档入口。
 
-### `.harness/current.json`
+`.harness/current.json` 保留 schema、generator 身份、依赖与 per-change context，由循环工具维护派生状态，执行者只补无法推导的上下文；不要在普通会话更新它。`reset-current` 会清空状态，不是迁移或日常收尾步骤。`.harness/feature-index.json` 由 `sync-feature-index.py` 派生，人工只维护 overrides。
 
-覆盖式当前恢复点。只保留新会话恢复所需的最小信息：唯一 active 执行 change（`active_change`）、候选 change、当前 task、最后验证 task、working files、blocker、next action、dirty assumptions、last checkpoint。
+现有 change 继续遵守全部既定要求，不能换成日常协作来跳过评估或人工步骤。日常任务若与其范围冲突，应回到对应 change；并发采用隔离工作区，active 不是文件锁。
 
-`active_change` 是唯一执行槽；它仍保留这个字段名以兼容现有脚本和 agent 习惯，但语义是 active execution change。候选 change 不进入执行槽，不能改实现代码或写最终验证结论。实现和自动验证已完成但仍待人工检查的 change 可以不是 active，它只等待 `verification.json` 中的 `role: human` 步骤被人工作答后自动 close。
+## 验证与知识
 
-### `.harness/feature-index.json`
+`init.sh` / `init.ps1` 是跨平台 Unity 环境探针，支持仓库根、`UnityProject/` 和 `UNITY_PROJECT_DIR`。未初始化 OpenSpec 时跳过可选列表检查。只有显式设置 Unity 动作变量才运行导入或测试；探针不等于功能验证。
 
-能力索引，不是任务管理器。每项只保存 capability 与 OpenSpec spec 的映射、成熟度、质量等级、活跃变更和最近验证提交。
+长期架构、决策和经验分别放在 `docs/architecture/`、`docs/adr/`、`docs/knowledge/`。质量记录按 `docs/quality/README.md` 的触发条件更新。日常任务无需创建预筛 JSON，自动循环保留预筛门槛。
 
-骨架由 `.harness/scripts/sync-feature-index.py` 从 `openspec/specs/` 派生（`--check` 只校验是否同步）；人工只维护 `overrides` 中的 `title`、`domain`、`maturity`、`quality` 和 `last_verified_commit`。不要手工编辑 `features` 数组。
+## 升级与后台任务
 
-不要在这里写详细验证步骤、证据或 tasks 状态。
+更新器保留项目自己的 agent 规则、状态和事实文件；升级后需手动合并新版 `CLAUDE.md` / `AGENTS.md`。保留已有 current、change、验证与历史记录，新任务按需要选择流程，无需批量迁移。
 
-### `.harness/templates/`
-
-存放变更级模板：
-
-- `program.md`：本次变更的约束与评估规则；评估规则是 Evaluator 判定通过/失败的唯一权威。
-- `verification.json`：验证步骤与结论，按 `role` 区分自动验证与人工验证。
-- `checkpoint.md`：会话恢复摘要。
-
-### `docs/quality/`
-
-长期质量聚合：
-
-- `README.md`：质量文档更新触发条件。
-- `scorecard.md`：领域与架构层评分。
-- `tech-debt.md`：长期技术债。
-- `risks.md`：长期风险。
-
-单次变更的完整测试日志不写进全局质量文档；触发条件与「质量文档判断」的写法见 `docs/quality/README.md`。
-
-### `init.ps1` / `init.sh`
-
-跨平台环境探针。默认只检查当前目录、OpenSpec、Unity 项目结构（仓库根或默认 `UnityProject/`，可用 `UNITY_PROJECT_DIR` 覆盖）和 Unity 可执行文件；只有显式设置 `RUN_UNITY_IMPORT`、`RUN_EDITMODE`、`RUN_PLAYMODE` 或 `RUN_START_COMMAND` 时才执行对应 Unity 动作。它不负责归档。
-
-### `.harness/scripts/harness`
-
-包装命令：
-
-- `harness status [--json]`：一次输出会话恢复所需的执行状态——active 槽、候选 change 与 lifecycle phase、blocker、next action、任务进度、证据数量、漂移告警和最近提交。漂移或状态错误时以非零码退出。
-- `harness sync-candidates`：按 `openspec/changes/` 的实际内容重写候选集合。候选成员关系不由人工维护，per-change context 原样保留。
-- `harness verify <change>`：校验 OpenSpec、检查变更级质量文件，并运行平台环境探针。
-- `harness close <change> [--skip-specs]`：在 verify 与共享门槛断言通过后建立回滚点 `harness/pre-close/<change>`，执行 `openspec archive`，随后自动收尾 `.harness/current.json`。就绪度成立时由循环自动调用。`--skip-specs` 用于 infra、工具或纯文档变更。
-- `harness reset-current`：清空 `.harness/current.json`，只保留可恢复的空执行槽。
-
-Windows 用 `.\.harness\scripts\harness.ps1`，选项名为 `-SkipSpecs` 与 `-Json`。
-
-### `.harness/scripts/harness_state.py`
-
-状态层的唯一实现：current.json 的 schema 定义、schema 校验、lifecycle 推导、证据列举、漂移检测与状态写回。`.harness/dashboard/server.py` 与两个平台的 `harness` 脚本都调用它，不各自重写。
-
-### `.harness/scripts/sync-feature-index.py`
-
-从 `openspec/specs/` 重新生成 `.harness/feature-index.json` 骨架；`--check` 只检查是否已同步，不写文件。
-
-## 后台 Codex 任务
-
-如果项目希望像垃圾回收一样持续偿还 agent 残留和架构漂移，使用 `docs/agents/` 中的后台任务 Prompt。应用方式见 `docs/agents/background-codex-tasks.md`。
-
-定时任务不得绕过 OpenSpec：如果发现的问题会改变产品行为、规格事实或质量契约，应先创建 candidate change，而不是直接让后台任务改代码。
-
-## 暂缓事项
-
-第一版只定义 hook 边界，不强制实现完整 Claude Code hook 系统。等 `.harness/current.json` 与 `verification.json` 格式稳定后，再实现 `SessionStart`、`PreCompact`、`Stop` 等 hook。
+后台 Prompt 位于 `docs/agents/`。未启用 OpenSpec、没有 active 或 current 未更新本身不是日常任务的故障。只读扫描保持只读，扫描发现不自动扩大实现授权；涉及已有 change 的修复遵守原流程。

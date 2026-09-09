@@ -1,31 +1,15 @@
-# Checkpoint
+# Checkpoint：<topic 或 change id>
 
-- 时间：
-- Active execution change：
-- Candidate changes：
-- 当前 task：
-- 已完成 task：
-- 已运行验证：
-- 证据位置：
-- Blocker：
-- Dirty assumptions：
-- 下一步：
+仅在未完成且需要交接时使用，省略不适用项，不复制 Git diff 或任务清单。
 
-## 重要决定
+- 时间与适用提交：
+- 工作方式：日常协作 / 自动循环
+- 目标与已确认约束：
+- 关键决定及原因：
+- 失败尝试与排除依据：
+- 已运行验证与证据链接：
+- 未验证内容、阻塞或待确认问题：
+- 下一步与验证方式：
+- 自动循环（如适用）：change id 与上下文位置
 
-- 
-
-## 未验证内容
-
-- 
-
-## 恢复命令
-
-```bash
-pwd
-openspec list
-# Windows:
-.\init.ps1
-# Unix/macOS/Linux:
-./init.sh
-```
+恢复时核对当前代码与相关约定；自动循环使用 `harness status`。仅在需要 Unity 验证时运行环境探针。

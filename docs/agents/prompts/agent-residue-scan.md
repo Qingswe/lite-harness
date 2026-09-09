@@ -18,8 +18,8 @@
    - `pwd`
    - `git status --short`
    - `git log --oneline -5`
-   - `openspec list`
-   - `./init.sh` 或 `.\init.ps1`
+   - 仅涉及已启用的自动循环时运行 `harness status`，不要为扫描初始化 OpenSpec。
+   - 需要 Unity 验证时运行 `./init.sh` 或 `.\init.ps1`。
 3. 扫描这些残留信号：
    - `TODO`、`FIXME`、`HACK`、`temporary`、`quick fix`、`guess`、`yolo`。
    - 未结构化或临时 `Debug.Log`。

@@ -1,6 +1,6 @@
 # Background Task Prompts
 
-本目录存放可直接复制给 Codex 的后台任务 Prompt。每个 Prompt 都假设目标项目已经采用 lite-harness，并且根目录存在 `AGENTS.md`、`.harness/current.json`、`init.sh` 或 `init.ps1`。
+本目录存放可直接复制给 Codex 的后台任务 Prompt。Prompt 遵守目标项目的 `AGENTS.md` / `CLAUDE.md`。日常扫描无需 current 或 OpenSpec；已有自动循环按其规则恢复。
 
 ## 使用方式
 
@@ -8,7 +8,7 @@
 2. 复制对应文件中的“Codex Prompt”整段内容。
 3. 为任务设置合适频率，参考 `docs/agents/background-codex-tasks.md`。
 4. 如果任务会改文件，要求 Codex 使用 `codex/gc-<task>-<date>` 分支，并创建 draft PR。
-5. 审查 PR 时优先看报告、验证证据和是否遵守 OpenSpec active change 规则。
+5. 审查 PR 时优先看报告、验证证据和是否遵守授权范围及适用的 change 规则。
 
 ## Prompt 变量
 

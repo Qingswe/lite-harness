@@ -1,83 +1,50 @@
 # CLAUDE.md
 
-你正在一个为长时实现工作设计的 Unity（C#）仓库中工作。优先保证可靠完成、跨会话连续性和显式验证，而不是表面速度。
+本仓库面向长时运行的 coding agent 工作流，典型目标平台为 Unity（C#）。保留无法可靠重建的信息，让工作可验证、可续接；文档与工具按任务需要使用。
 
-## 权威来源链
+## 选择工作方式
 
-一种信息只能有一个权威来源，其他文件只能引用它，不能复制它：
+默认采用**日常协作**：围绕用户目标直接实现、验证和提交，不要求 OpenSpec、active change、`current.json` 或独立 Evaluator。
 
-1. 项目原则：`AGENTS.md` / `CLAUDE.md`
-2. 当前产品事实：`openspec/specs/`
-3. 变更设计：`openspec/changes/<id>/proposal.md`、`design.md`、`specs/`
-4. 执行状态：`.harness/current.json` 中的唯一 active 执行槽、候选 change 与恢复点
-5. 验证证据：对应 change 的 `verification.json`、`.harness/evidence/`
-6. 知识归档：`openspec/changes/archive/`、`docs/adr/`、`docs/knowledge/`
+接续已有 OpenSpec change，或用户要求自动循环、队列调度和自动归档时，采用**自动循环**，遵守 `.harness/program.md`。复杂、跨模块或兼容性变更先明确设计与验收，可以选择 OpenSpec；复杂本身不强制启动循环。
 
-## 固定工作循环
+工作方式按任务选择，不新增全仓库模式开关。存在空 `current.json` 或安装了 OpenSpec 不表示所有任务都进入循环。已有 change 的实现和评估必须继续走原流程；不得用日常协作绕过验收、角色隔离或未完成的人工步骤。
 
-每轮会话开始时：
+## 信息来源
 
-1. 运行 `pwd`，确认当前在正确的仓库根目录。
-2. 运行 `.harness/scripts/harness status`（Windows 用 `.\.harness\scripts\harness.ps1 status`）。它一次给出 active 执行槽、候选 change 与 lifecycle phase、blocker、next action、任务进度、证据数量、漂移告警和最近提交——不要再手工分别读 `.harness/current.json`、跑 `openspec list` 和 `git log` 去拼同一份信息。若它以非零码退出（漂移或状态错误），先修状态再继续。
-3. 读取当前 active change 的 `proposal.md`、`tasks.md`、`program.md`。若没有 active change，可以创建或继续多个候选 change 的调研、proposal 和 plan，也可以等待人工检查完成后按指令 close 已完成 change；进入实现前必须先选定唯一 active change。
-4. 读取相关 `ARCHITECTURE.md` 与 `docs/architecture/`；在 `docs/quality/scorecard.md` 中只读取与当前 change 领域相关的评分行，不要整份读取。需要追溯某次评分变化时再查 `docs/quality/scorecard-history.md`。
-5. 需要真实 Unity 验证时才运行平台入口做环境探针：Windows 用 `.\init.ps1`，Unix/macOS/Linux 用 `./init.sh`。入口脚本从仓库根定位实际 Unity 项目（仓库根或默认 `UnityProject/`，可用 `UNITY_PROJECT_DIR` 覆盖）。是否需要探针由当前 change 的 `program.md` 与验证记录共同决定，`harness verify` 会自动判断。
+- 工作规则：本文件；`AGENTS.md` 只引用。
+- 实际实现：代码和测试。产品约定在项目现有产品文档维护唯一版本，并从 `ARCHITECTURE.md` 链接；采用 OpenSpec 的行为以 `openspec/specs/` 为规格来源。
+- 当前结构：`ARCHITECTURE.md` / `docs/architecture/`；长期决策与经验：`docs/adr/` / `docs/knowledge/`。
+- 日常验证：优先引用测试输出、CI、提交或 PR，需持久保留的本地日志放 `.harness/evidence/`。不重复抄录已有证据。
+- 自动循环状态：`.harness/current.json`；变更设计与任务：`openspec/changes/<id>/`；验证事实：对应 `verification.json`，CLI 与看板共用 `harness_verification.py`，不得另写解析器。
 
-然后只围绕这个 active change 工作，逐条推进 `tasks.md`，直到该变更实现和自动验证完成、被释放出 active 执行槽，或被明确记录为 blocked。候选 change 可以并存，但只能处于调研、proposal、design、spec 草案和 tasks 规划阶段。
+## 日常协作
 
-如果环境探针或质量契约要求的基础验证一开始就失败，先修基础状态，不要在坏的起点上继续叠新功能。
+1. 运行 `pwd`、`git status --short` 和 `git log --oneline -5`，确认目录、已有修改与近期工作。保护用户的未提交修改。
+2. 读取相关架构、产品约定；接续未完成工作时读取对应交接并核对适用提交。有相关 OpenSpec change 时先确认其范围，属于该 change 的工作转入自动循环流程。
+3. 明确目标、范围和验证方式。小任务直接执行；行为有歧义或影响较大时，先用现有设计文档澄清，避免重复创建多套计划。
+4. 按风险执行构建、测试或人工验收。需要真实 Unity 验证时运行 `./init.sh`（Windows：`.\init.ps1`），按需设置 `UNITY_PROJECT_DIR`、`RUN_UNITY_IMPORT`、`RUN_EDITMODE` 或 `RUN_PLAYMODE`。环境探针通过不等于功能验证通过。
+5. 报告完成行为、实际验证结果、未验证部分和必要限制，安全后提交本次改动，Unity `.meta` 随资源提交。
 
-## 规则
+不要求每轮更新 `current.json`、勾任务表或填写验证 JSON。只有未完成且需要跨会话继续时，才写 `.harness/checkpoints/<topic>/<YYYYMMDD>[-<label>].md`，省略可从 Git 恢复的文件清单。记录目标约束、关键决定、失败尝试、阻塞、下一步和证据链接；完成后标记已完成，长期结论移入对应文档，不重写历史检查点。
 
-- `openspec/changes/` 下可有多个候选 change，只做调研、proposal、design、spec 草案和 tasks 规划。
-- 同一时间只有一个 active 执行 change：`.harness/current.json.active_change` 是唯一执行槽，只有它能进行实现、改 `openspec/specs/`、写本轮自动验证证据。
-- 已完成实现与自动验证但仍等待人工检查的 change，可以从 `active_change` 释放出来，保留在 `openspec/changes/<id>/` 中等待人工处理，不阻塞下一个 active change。
-- 候选 change 晋升前先确认范围不与当前 active change 冲突，再更新 `active_change` 后逐条推进它的 `tasks.md`。
-- 没有可运行证据时，不要声称完成；不要因为“代码已经写了”就勾掉任务。
-- 不要通过偷改 `tasks.md` 勾选或重写需求来隐藏未完成工作。
-- 不要为了“看起来完成”而删除或削弱测试，也不要在实现过程中悄悄改弱验证规则。
-- 除非是为了消除当前 blocker 的窄范围修复，否则不要把工作扩大到其他变更。
-- 不要直接运行 `openspec archive <id>`；归档一律通过 `.harness/scripts/harness close <id>`。
-- 归档由就绪度驱动：七项判据全部成立时自动执行 close，不需要人工逐个确认归档动作。取消的是归档动作的确认，不是人工步骤本身——`verification.json` 中任何 `role: human` 且未作答的步骤都会让就绪度为假。
-- close 前必须先建立回滚点 `harness/pre-close/<id>`；建不出回滚点时必须中止归档。
-- 实现与评估必须由不同角色、不同模型承担，边界见 `.harness/program.md`。同一次提交不得既改实现又把验证步骤置为终态。
-- 质量文档判断由预筛脚本从 diff 计算，默认「无需更新」；只有被触发的条目才需要人工写理由，不再逐条撰写「无需更新」说明。触发规则仍以 `docs/quality/README.md` 为准。
-- 以仓库内文件作为唯一事实来源，不依赖聊天记录恢复状态。
+架构、长期质量、债务、风险或可复用经验变化时更新相关文档，见 `docs/quality/README.md`；普通任务无需逐项填写“无需更新”。
 
-## 必需文件
+## 自动循环
 
-- `openspec/` — 产品事实、变更设计、任务和归档的事实来源。
-- `.harness/current.json` — 当前恢复点。
-- `.harness/feature-index.json` — 能力索引，不是任务管理器；骨架由 `.harness/scripts/sync-feature-index.py` 从 `openspec/specs/` 派生，人工只维护 `overrides`。
-- `.harness/program.md` — 循环宪法：角色边界、归档策略、回滚规则与预算。客户端中立，与各客户端的 agent 定义冲突时以它为准。
-- `.harness/scripts/harness_verification.py` — 验证记录的唯一解析实现，CLI 与 dashboard 共用。禁止第二份。
-- `.harness/templates/` — checkpoint、program 与 verification 模板。
-- `docs/quality/README.md` 与 `docs/quality/scorecard.md` — 质量文档更新规则与长期评分卡。
-- `init.ps1` / `init.sh` — 跨平台环境探针；不再默认强制执行完整 Unity 测试。
+1. 用 `.harness/scripts/harness status`（Windows：`harness.ps1 status`）恢复 active、候选、上下文与漂移状态，不再手工拼接重复信息。状态错误先查明并修复。
+2. 读取 active change 的 `proposal.md`、`tasks.md`、`program.md` 和相关架构；评分卡仅读取相关领域。没有 active 时可规划候选，进入该循环的实现前必须选定唯一 active change。
+3. 状态通过现有 CLI / dashboard 维护；候选集合由 `harness sync-candidates` 派生。执行者仅补充工具不能推导的上下文、generator 身份、阻塞与恢复信息，不手抄派生进度。普通会话不修改这些循环状态。
+4. 使用 `harness next` 调度；Generator 与 Evaluator 必须由不同 agent、不同模型承担，写入边界和身份断言以 `.harness/program.md` 为准。Generator 不写验证终态或评估证据，Evaluator 不改实现或任务。
+5. 实现和自动验证完成但待人工的 change 可释放 active，保留可恢复的 gated 上下文，不阻塞下一个 change。候选阶段仅做调研和设计规划。
+6. Evaluator 按约定运行真实验证，通过 `harness check` 记录 `verification.json` 与证据；预筛质量文档，按触发结果更新长期记录。按需生成 checkpoint。
+7. `harness ready` 计算就绪度，`harness lint` 运行归档门槛；七项判据和归档回滚要求见 `.harness/program.md`。就绪后 `harness autoclose` 通过完整 close 自动归档，保留全部门槛，不直接调用 `openspec archive`。未作答的人工步骤继续阻塞。
 
-## 完成门槛
+自动循环使用 OpenSpec、`current.json`、`program.md` 与 `verification.json`。保留它们的 schema、身份、依赖和回滚语义；能力索引由 `sync-feature-index.py` 派生，人工仅维护 overrides。普通任务无须维护这些可选工具的数据文件。
 
-一个变更只有在以下条件都满足后才能归档：
+## 两种方式共同遵守
 
-归档就绪度由以下七项共同计算，全部成立才自动归档。人工写入的 phase 只能收紧不能放宽：声称可归档但计算判定未就绪时，采信计算结果并报告是哪一项判据。
-
-- `tasks.md` 全部勾选，且目标行为确实已实现。
-- `openspec validate <id> --strict` 通过。
-- `verification.json` 全部步骤为 `passed` 或 `waived`，`waived` 均有说明。
-- 步骤引用的每个证据路径真实存在。
-- `program.md` 的每条评估规则至少被一个已通过或已豁免的步骤覆盖。
-- 质量文档预筛已运行，被触发的条目均有人工理由。
-- 角色隔离校验通过。
-
-就绪度只驱动触发；`harness close` 仍执行完整门槛断言，就绪度误报时它是最后一道。
-用 `.harness/scripts/harness ready` 查看现在可归档哪些、其余各差什么；用 `harness lint <id>` 随时跑与 close 相同的门槛。
-
-## 结束前
-
-1. 更新 `.harness/current.json`。
-2. 需要交接时从 `.harness/templates/checkpoint.md` 生成 checkpoint。
-3. 把验证结果写入对应 change 的 `verification.json`（用 `harness check <id> <step> <status>`，格式由命令保证）；需要人阅读时用 `harness render <id>`。
-4. 按 `docs/quality/README.md` 判断并更新长期质量、技术债、风险或知识归档文档。
-5. 就绪度七项判据全部成立时由 `.harness/scripts/harness autoclose` 自动归档，不需要人工逐个指令；仍然不要直接运行 `openspec archive`。带 `role: human` 未作答步骤的 change 到不了就绪，会停在待人工。
-6. 记录仍然损坏或未验证的内容，以及仍未解决的风险或 blocker。
-7. 在仓库可安全恢复后，用清晰的提交信息提交（注意 `.meta` 文件与改动一起提交）。
+- 不因代码已写、任务已勾选就声称完成；不伪造验证或代答人工步骤。
+- 不悄悄修改需求、放宽验收或削弱测试。相关基础验证失败时先查原因，无关失败说明影响，避免扩大修复范围。
+- 只推进授权范围。日常任务与循环任务不得冲突；并行执行用隔离工作区或明确文件边界，active 状态不是 Git 并发锁。
+- 优先使用持久文件恢复已确认事实；用户的新指令优先，并把会影响后续工作的决定落到对应文档。

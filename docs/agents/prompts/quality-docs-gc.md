@@ -18,9 +18,9 @@
    - `pwd`
    - `git status --short`
    - `git log --oneline -5`
-   - `openspec list`
-   - `./init.sh` 或 `.\init.ps1`
-3. 检查 OpenSpec archive 和 active/candidate changes：
+   - 仅涉及已启用的自动循环时运行 `harness status`，不要为扫描初始化 OpenSpec。
+   - 需要 Unity 验证时运行 `./init.sh` 或 `.\init.ps1`。
+3. 检查近期提交、PR、测试证据与质量记录；以下 close / verification JSON 检查仅针对已有 OpenSpec change：
    - 已 close 的 change 是否缺 `docs/knowledge/changes/` 摘要。
    - `verification.json` 的 `quality_docs` 是否缺 `prescreen_run`，或被触发的条目缺人工理由。
      预筛只对**触发**举证；未触发的条目沉默即结论，不要求补写说明。
@@ -29,7 +29,7 @@
    - `risks.md` 是否有无缓解方式、无上次更新时间、影响范围过宽但没有 owner 的项。
 4. 只有在能引用证据时，才更新 `scorecard.md`；更新必须遵守 `docs/quality/README.md` 的「评分卡写法约束」——单元格 ≤ 120 字符，日期条目写入 `docs/quality/scorecard-history.md` 而不是 `scorecard.md`。
 5. 技术债和风险可以新增、关闭或改状态，但必须写明来源：
-   - OpenSpec change
+   - 提交、PR 或 OpenSpec change
    - 验证报告
    - 扫描报告
    - 人工确认
@@ -42,5 +42,5 @@
 - 写入 `.harness/evidence/agent-gc/<DATE>/quality-docs-gc/report.md`。
 - 如有文档修改，创建分支 `codex/gc-quality-docs-<DATE>`。
 - PR 描述必须列出每个质量文档改动对应的证据路径。
-- 如果发现需要产品修复的问题，不要修代码；创建或建议 OpenSpec candidate change。
+- 如果发现需要产品修复的问题，不要修代码；报告并提出设计建议；已有 OpenSpec 范围按 change 流程处理。
 ```

@@ -18,8 +18,8 @@
    - `pwd`
    - `git status --short`
    - `git log --oneline -5`
-   - `openspec list`
-   - `./init.sh` 或 `.\init.ps1`
+   - 仅涉及已启用的自动循环时运行 `harness status`，不要为扫描初始化 OpenSpec。
+   - 需要 Unity 验证时运行 `./init.sh` 或 `.\init.ps1`。
 3. 如果是 Unity 项目，按项目实际结构检查：
    - asmdef 依赖方向。
    - 文件夹/命名空间是否暗示反向依赖。

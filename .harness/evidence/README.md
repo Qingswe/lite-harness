@@ -1,5 +1,7 @@
 # Evidence
 
+日常协作优先引用已有 CI、测试输出或 PR；需要保留本地证据时放 `.harness/evidence/<topic>/`，topic 为稳定任务名，不要求对应 OpenSpec。以下 change 结论和目录规则适用于自动循环。
+
 这里存放验证证据的索引或生成物引用，例如 Unity Test Framework 结果、编译日志、截图说明或人工验收记录。
 
 证据原则：

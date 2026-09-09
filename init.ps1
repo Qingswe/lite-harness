@@ -110,12 +110,12 @@ Write-Output "==> Current directory: $PWD"
 if ($env:SKIP_OPENSPEC_LIST -eq "1") {
     Write-Output "==> Skipping OpenSpec list (SKIP_OPENSPEC_LIST=1)"
 }
-elseif (Get-Command "openspec" -ErrorAction SilentlyContinue) {
+elseif ((Test-Path "openspec/changes" -PathType Container) -and (Get-Command "openspec" -ErrorAction SilentlyContinue)) {
     Write-Output "==> OpenSpec active changes"
     openspec list
 }
 else {
-    Write-Output "==> openspec not found; skipping OpenSpec probe"
+    Write-Output "==> OpenSpec not initialized or CLI unavailable; skipping optional probe"
 }
 
 $UnityProjectDir = Resolve-UnityProjectDir

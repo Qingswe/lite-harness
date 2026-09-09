@@ -13,13 +13,13 @@
 
 请遵守以下规则：
 
-1. 读取 `AGENTS.md` / `CLAUDE.md`、`ARCHITECTURE.md`、`docs/quality/risks.md`、当前 active change 的 `program.md`。
+1. 读取 `AGENTS.md` / `CLAUDE.md`、`ARCHITECTURE.md`、`docs/quality/risks.md`；如涉及已有 change，另读其 `program.md`。
 2. 运行并记录：
    - `pwd`
    - `git status --short`
    - `git log --oneline -5`
-   - `openspec list`
-   - `./init.sh` 或 `.\init.ps1`
+   - 仅涉及已启用的自动循环时运行 `harness status`，不要为扫描初始化 OpenSpec。
+   - 需要 Unity 验证时运行 `./init.sh` 或 `.\init.ps1`。
 3. 确认目标项目是真实 Unity 项目：
    - 存在 `Assets/`
    - 存在 `Packages/manifest.json`

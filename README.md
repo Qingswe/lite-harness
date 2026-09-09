@@ -1,6 +1,6 @@
 # lite-harness
 
-面向长时运行 coding agent 的轻量工作流脚手架。本仓库将 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 的规格与变更管理，与文件驱动的 harness（执行状态、验证证据、质量归档）相结合，使跨会话协作具备可恢复、可验证、可审计的执行纪律。
+面向长时运行 coding agent 的轻量工作流脚手架。默认直接实现、验证和提交，按需保留交接、决策与经验。需要自动循环时，可选用 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 与 harness 的状态调度、独立评估和自动归档。
 
 本仓库以 Unity（C#）为典型应用场景，harness 机制本身与语言无关，可适配其他技术栈。
 
@@ -12,12 +12,18 @@
 
 复制完成后，请在目标项目根目录执行以下步骤：
 
-1. 安装 [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec)，并运行 `openspec init` 完成初始化。
-2. 按项目实际情况填写 `ARCHITECTURE.md`、`.harness/current.json` 与 `.harness/feature-index.json`。
+1. 合并项目已有的 agent 指令，按实际情况填写 `ARCHITECTURE.md`。
+2. 按 `CLAUDE.md` 的日常协作流程开始任务，无需安装 OpenSpec 或维护 `current.json`。选择自动循环时，再初始化 OpenSpec 并使用现有 harness 工具维护状态。
 3. 参阅 [index.md](index.md) 了解变更创建、执行与归档的完整流程。
 4. 如需定期运行后台 Codex 任务，参阅 [docs/agents/README.md](docs/agents/README.md) 与 [docs/agents/background-codex-tasks.md](docs/agents/background-codex-tasks.md)。
 
-## 核心理念
+## 日常协作（默认）
+
+确认目标与 Git 状态，读取相关代码和约定，实施改动并运行必要验证，安全后提交。只有未完成工作需要交接时才创建 checkpoint；长期结论归入架构、ADR 或知识文档。有长期质量变化才更新质量记录，不为小任务生成整套文档。
+
+复杂变更先明确设计与验收，可选择 OpenSpec。接续已有 change 或运行自动循环时继续遵守原有质量契约和角色边界，不能绕过人工检查。保留的空 `current.json` 是兼容自动循环的模板，不是日常任务必须更新的状态。
+
+## 自动循环的信息来源（可选）
 
 本工作流遵循单一权威来源原则：一种信息只对应一个权威来源，其余文件仅作引用，不得重复维护副本。
 
@@ -27,7 +33,7 @@
 
 | 层级 | 权威来源 |
 | --- | --- |
-| 项目原则 | `AGENTS.md` / `CLAUDE.md` |
+| 项目原则 | `CLAUDE.md`（`AGENTS.md` 引用） |
 | 当前产品事实 | `openspec/specs/` |
 | 变更设计 | `openspec/changes/<id>/`（proposal、design、spec 增量、tasks） |
 | 执行状态 | `.harness/current.json`（唯一 active 执行槽、候选 change 与恢复点） |
@@ -38,11 +44,11 @@
 
 循环里有两个角色，由不同 agent、不同模型承担：**Generator** 推进实现并勾任务，**Evaluator** 判定验证步骤并写证据。谁都不能做对方那一半——自动归档下这条独立性是唯一挡住自批作业的东西。角色契约写在客户端中立的 `.harness/program.md`。
 
-## 前置依赖
+## 可选工具依赖
 
 | 依赖 | 用途 | 说明 |
 | --- | --- | --- |
-| [OpenSpec](https://github.com/Fission-AI/OpenSpec) | 规格与变更管理 | 必装；提供 `openspec validate`、`openspec list`、`openspec archive` 等命令 |
+| [OpenSpec](https://github.com/Fission-AI/OpenSpec) | 规格与变更管理 | 仅自动循环需要；提供 `openspec validate`、`openspec list`、`openspec archive` 等命令 |
 | Python 3 | 本地看板（Dashboard） | 仅使用标准库，无需额外安装依赖 |
 | Bash / PowerShell | 脚本执行 | 仓库同时提供 `.sh` 与 `.ps1` 入口 |
 
@@ -53,18 +59,9 @@ npm install -g @fission-ai/openspec@latest
 openspec init
 ```
 
-## 工作循环
+## 自动循环
 
-每轮 agent 会话建议按以下顺序恢复上下文：
-
-1. 确认当前工作目录为项目根目录。
-2. 读取 `.harness/current.json`，确认 `active_change`、候选 change、当前 task、blocker 与 next action。
-3. 运行 `openspec list` 查看变更列表；读取 active change 的 `proposal.md`、`tasks.md`、`program.md`。
-4. 查阅 `git log --oneline -5` 了解近期提交。
-5. 读取相关 `ARCHITECTURE.md`、`docs/architecture/` 与 `docs/quality/scorecard.md`。
-6. 运行 `init.ps1`（Windows）或 `init.sh`（Unix / macOS / Linux）执行环境探针。
-
-随后仅围绕当前 active change 逐条推进 `tasks.md`，直至实现和自动验证完成、释放 active 执行槽，或被明确记录为 blocked。
+仅对进入自动循环的任务，使用 `harness status` 恢复状态，读取 active change 的设计、任务和评估规则，再由 `harness next` 分派 Generator / Evaluator。需要真实 Unity 验证时才运行环境探针。完整规则以 [CLAUDE.md](CLAUDE.md) 与 [.harness/program.md](.harness/program.md) 为准。
 
 ### 执行规则
 
@@ -76,7 +73,7 @@ openspec init
 
 完整规则见 [AGENTS.md](AGENTS.md) 与 [CLAUDE.md](CLAUDE.md)。
 
-## Harness 命令
+## 自动循环的 Harness 命令
 
 ```bash
 .harness/scripts/harness status            # active 槽、候选、blocker、next action、漂移，一次给全
@@ -118,6 +115,8 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 ```
 
 更新器默认从 `https://github.com/Qingswe/lite-harness.git` 的 `main` 分支读取 `.harness/update-manifest.txt`，只同步 harness 管理的脚本、看板、模板和流程说明文件。它不会默认覆盖项目事实或执行状态文件，例如 `AGENTS.md`、`CLAUDE.md`、`ARCHITECTURE.md`、`README.md`、`.harness/current.json`、`.harness/feature-index.json`、`openspec/` 与长期质量记录。
+
+升级已有项目时，需手动合并 `CLAUDE.md` / `AGENTS.md` 及 `.harness/program.md` 的适用范围 的日常协作规则；更新器不覆盖这些项目自有规则。不要删除旧 current、change 或验证记录来迁移，也不要取消已有验收要求。
 
 实际同步时会先把被覆盖的文件备份到 `.harness/backups/harness-update-<timestamp>/`。可通过 `--ref <tag-or-branch>` / `-Ref <tag-or-branch>` 固定更新来源。
 
@@ -161,7 +160,7 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
     └── knowledge/             # 知识归档与踩坑记录
 ```
 
-## 完成门槛
+## 自动循环的归档门槛
 
 变更仅在满足以下全部条件后方可归档：
 

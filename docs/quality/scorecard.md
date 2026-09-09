@@ -1,5 +1,7 @@
 # 质量评分卡
 
+日常协作的评分证据可直接引用 CI、测试输出、提交或 PR；下述 change 路径用于自动循环。
+
 这份文档只记录项目和领域的长期质量**当前快照**，不记录单次变更的完整验证日志。
 
 - 单次变更的约束与评估规则写在 `openspec/changes/<change>/program.md`，真实验证证据写在 `openspec/changes/<change>/verification.json`。

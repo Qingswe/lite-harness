@@ -1,6 +1,6 @@
 # Agent Automation Docs
 
-这里存放给 Codex 或其他 coding agent 使用的长期自动化说明。目标不是替代 OpenSpec change 流程，而是把“熵与垃圾收集”做成可重复运行的后台任务。
+这里存放给 Codex 或其他 coding agent 使用的长期自动化说明。后台扫描按授权范围运行，不要求项目启用 OpenSpec；涉及已有 change 时继续遵守其流程。
 
 ## 适用场景
 
@@ -28,7 +28,7 @@ docs/agents/
 
 ## 推荐接入顺序
 
-1. 先启用 `harness-health-check`，保证 OpenSpec、`.harness/current.json`、初始化探针和 active change 状态可恢复。
+1. 先启用 `harness-health-check`，检查项目入口、交接和证据；仅对已启用的自动循环检查 OpenSpec 与状态。
 2. 再启用 `quality-docs-gc`，让 `scorecard.md`、`tech-debt.md`、`risks.md` 不会变成过期摆设。
 3. 然后启用 `architecture-drift-scan` 和 `agent-residue-scan`，开始捕捉偏离黄金原则的模式。
 4. 最后启用 `refactor-pr-candidate`，只针对已经被扫描任务确认的小范围问题发起 PR。
@@ -38,6 +38,6 @@ docs/agents/
 
 - 后台任务默认先产出报告，不直接改产品行为。
 - 只有低风险、范围很窄、验证路径清楚的问题，才允许自动创建重构 PR。
-- 如果问题会改变产品行为、规格事实或质量契约，必须先创建 OpenSpec candidate change。
+- 如果问题超出扫描或小重构授权，先报告并提出设计建议；涉及已有规格或质量契约时，按对应 change 流程处理，不直接扩大实现范围。
 - 所有自动化输出都必须写入可审查位置，例如 `.harness/evidence/agent-gc/<date>/`、`docs/quality/` 或新的 OpenSpec change。
 - 定时任务不得直接运行 `openspec archive`；归档一律走 `.harness/scripts/harness close <change>`，并由就绪度驱动（见 `.harness/program.md`）。定时任务本身不得代答 `role: human` 步骤。

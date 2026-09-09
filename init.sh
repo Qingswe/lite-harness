@@ -102,11 +102,11 @@ echo "==> 当前目录: $PWD"
 
 if [ "${SKIP_OPENSPEC_LIST:-0}" = "1" ]; then
   echo "==> 跳过 OpenSpec 列表（SKIP_OPENSPEC_LIST=1）"
-elif command -v openspec >/dev/null 2>&1; then
+elif [ -d "openspec/changes" ] && command -v openspec >/dev/null 2>&1; then
   echo "==> OpenSpec 活跃变更"
   openspec list || true
 else
-  echo "==> 未找到 openspec；跳过 OpenSpec 探针"
+  echo "==> 未初始化 OpenSpec 或 CLI 不可用；跳过可选探针"
 fi
 
 if ! UNITY_PROJECT_DIR_RESOLVED="$(resolve_unity_project_dir)"; then
