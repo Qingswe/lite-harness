@@ -4,7 +4,7 @@
 
 每条摘要应引用：
 
-- `openspec/archive/<change>/`
+- `openspec/changes/archive/<change>/`
 - 关键验证证据
 - 影响到的 capability
 - 需要后续关注的风险

@@ -22,11 +22,12 @@
    - `./init.sh` 或 `.\init.ps1`
 3. 检查 OpenSpec archive 和 active/candidate changes：
    - 已 close 的 change 是否缺 `docs/knowledge/changes/` 摘要。
-   - `verification.md` 是否缺“质量文档判断”。
+   - `verification.json` 的 `quality_docs` 是否缺 `prescreen_run`，或被触发的条目缺人工理由。
+     预筛只对**触发**举证；未触发的条目沉默即结论，不要求补写说明。
    - `scorecard.md` 的评级是否能引用证据。
    - `tech-debt.md` 是否有无来源、无建议处理、长期未更新的 open 项。
    - `risks.md` 是否有无缓解方式、无上次更新时间、影响范围过宽但没有 owner 的项。
-4. 只有在能引用证据时，才更新 `scorecard.md`。
+4. 只有在能引用证据时，才更新 `scorecard.md`；更新必须遵守 `docs/quality/README.md` 的「评分卡写法约束」——单元格 ≤ 120 字符，日期条目写入 `docs/quality/scorecard-history.md` 而不是 `scorecard.md`。
 5. 技术债和风险可以新增、关闭或改状态，但必须写明来源：
    - OpenSpec change
    - 验证报告

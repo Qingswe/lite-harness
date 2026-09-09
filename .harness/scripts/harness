@@ -9,14 +9,49 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'USAGE'
 用法:
-  .harness/scripts/harness verify <change>
-  .harness/scripts/harness close <change>
+  .harness/scripts/harness status [--json]
+  .harness/scripts/harness ready [--json]
+  .harness/scripts/harness next [--json]
+  .harness/scripts/harness autoclose [--dry-run]
+  .harness/scripts/harness rollback <change>
+  .harness/scripts/harness lint <change>
+  .harness/scripts/harness check <change> <step> <status> [--by <人>]
+                                 [--note <说明>] [--evidence <路径>] [--commit]
+  .harness/scripts/harness render <change> [--full]
+  .harness/scripts/harness sync-candidates
+  .harness/scripts/harness verify <change> [--no-probe]
+  .harness/scripts/harness close <change> [--skip-specs] [--no-probe]
   .harness/scripts/harness reset-current
+  .harness/scripts/harness roles [list|use <id>|set <id> --operator <名>]
 
 说明:
-  verify 负责 OpenSpec 严格校验、变更级质量文件检查和基础环境探针。
-  close 在 verify 通过后检查 tasks、human checks，再执行 openspec archive。
+  status 一次输出会话恢复所需的执行状态：active 槽、候选 change 与 lifecycle
+         phase、blocker、next action、任务进度、证据数量、漂移告警和最近提交。
+  ready  输出计算判定为可归档的 change，以及被阻塞项差的那一件事与责任方。
+         就绪度由七项判据共同推导，人工写入的 phase 只能收紧不能放宽。
+  next   输出循环的下一个动作：目标 change、目标 task 与应派出的角色。
+  autoclose 归档全部就绪的 change，按依赖顺序。就绪度成立即执行，不要求人工
+         逐个确认；每个 change 仍然走完整 close 与 ratchet。--dry-run 只列出。
+  rollback 把仓库退回某次归档之前。close 会把归档结果提交，因此 reset 到
+         回滚点即可完整还原；残留未跟踪文件会被报错而不是当作成功。
+  lint   运行与 close 完全相同的门槛断言但不归档，任何时刻可跑。
+  check  按 step id 写入验证结论，格式由命令保证。加 --commit 时把验证记录
+         单独提交，从构造上保证它不与实现改动同处一个提交。
+  render 把 verification.json 渲染成 markdown 供人阅读（事实来源仍是 JSON）。
+         默认紧凑：只展开人工步骤与未通过步骤；--full 展开全部。
+  sync-candidates 按 openspec/changes/ 的实际内容重写候选集合；候选成员关系
+         不由人工维护，per-change context 原样保留。
+  verify 负责 OpenSpec 严格校验、仓库结构检查（文档引用路径、skill 一致性、
+         feature-index 同步），并按 program.md 与验证记录决定是否执行 Unity
+         环境探针。
+  close  在 verify 与门槛断言通过后建立回滚点 harness/pre-close/<change>，
+         再执行 openspec archive。就绪度成立时由循环自动调用。
   reset-current 清空 .harness/current.json，只保留可恢复的空执行槽。
+
+选项:
+  --json        status / ready / next 以 JSON 输出，供脚本消费。
+  --no-probe    人工覆盖：即使 program.md 要求，也跳过 Unity 环境探针。
+  --skip-specs  归档时跳过 spec 更新，用于 infra、工具或纯文档变更。
 USAGE
 }
 
@@ -34,122 +69,360 @@ change_dir() {
   echo "openspec/changes/$change"
 }
 
-require_change_files() {
-  local change="$1"
+require_change_dir() {
   local dir
-  dir="$(change_dir "$change")"
-
+  dir="$(change_dir "$1")"
   [ -d "$dir" ] || fail "找不到变更目录: $dir"
-  [ -f "$dir/tasks.md" ] || fail "缺少 $dir/tasks.md"
-  [ -f "$dir/quality-contract.md" ] || fail "缺少 $dir/quality-contract.md，请从 .harness/templates/quality-contract.md 复制"
-  [ -f "$dir/verification.md" ] || fail "缺少 $dir/verification.md，请从 .harness/templates/verification.md 复制"
-  [ -f "$dir/human-checks.md" ] || fail "缺少 $dir/human-checks.md，请从 .harness/templates/human-checks.md 复制"
 }
 
-check_tasks_complete() {
-  local change="$1"
-  local tasks_file
-  tasks_file="$(change_dir "$change")/tasks.md"
+close_gate() {
+  # 必需文件、任务完成度、验证记录终态、风险下限、角色隔离、质量文档预筛。
+  # 全部判定都在 harness_checks.py 的 close_gate()，lint 与 close 调用同一个
+  # 函数，两平台也调用同一个函数——不得在 shell 里再写一份。
+  "$(resolve_python)" .harness/scripts/harness_checks.py gate "$1"
+}
 
-  if grep -Eq '^[[:space:]]*-[[:space:]]*\[[[:space:]]\]' "$tasks_file"; then
-    fail "$tasks_file 仍有未完成任务"
+resolve_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    echo python3
+  elif command -v python >/dev/null 2>&1; then
+    echo python
+  else
+    fail "缺少命令: python3"
   fi
 }
 
-check_human_checks_clear() {
-  local change="$1"
-  local checks_file
-  checks_file="$(change_dir "$change")/human-checks.md"
+show_status() {
+  local as_json="$1"
+  local python_bin
+  python_bin="$(resolve_python)"
 
-  if grep -Eiq '^[[:space:]]*\|[[:space:]]*(pending|failed)[[:space:]]*\|' "$checks_file"; then
-    fail "$checks_file 仍有 pending 或 failed 的人工检查表格行"
-  fi
-}
-
-check_quality_docs_decision() {
-  local change="$1"
-  local verification_file
-  verification_file="$(change_dir "$change")/verification.md"
-
-  if ! grep -Eq '^##[[:space:]]+质量文档判断[[:space:]]*$' "$verification_file"; then
-    fail "$verification_file 缺少“质量文档判断”章节；请按 docs/quality/README.md 判断是否需要更新 scorecard、tech-debt、risks 或 knowledge 文档"
+  # 状态投影与 dashboard 共用 .harness/scripts/harness_state.py，不在此重复实现。
+  if [ "$as_json" = "1" ]; then
+    "$python_bin" .harness/scripts/harness_state.py status --json
+  else
+    "$python_bin" .harness/scripts/harness_state.py status
   fi
 }
 
 verify_change() {
   local change="$1"
+  local no_probe="$2"
+  local python_bin
+  python_bin="$(resolve_python)"
 
   require_command openspec
-  require_change_files "$change"
+  require_change_dir "$change"
 
   echo "==> OpenSpec 严格校验: $change"
   openspec validate "$change" --strict
 
-  echo "==> 基础环境探针"
-  if [ -x "./init.sh" ]; then
-    ./init.sh
-  else
-    bash ./init.sh
+  echo "==> 仓库结构检查"
+  "$python_bin" .harness/scripts/harness_checks.py doc-refs
+  "$python_bin" .harness/scripts/harness_checks.py skills
+  "$python_bin" .harness/scripts/sync-feature-index.py --check
+
+  if [ "$no_probe" = "1" ]; then
+    echo "==> 环境探针: 跳过（--no-probe）"
+  elif "$python_bin" .harness/scripts/harness_checks.py probe-needed "$change"; then
+    echo "==> 基础环境探针"
+    # verify 已经跑过 openspec validate，探针无需再列一次变更。
+    SKIP_OPENSPEC_LIST=1 bash ./init.sh
   fi
 
   echo "==> verify 完成: $change"
 }
 
+lint_change() {
+  # 与 close 的门槛断言完全相同，只是不执行归档。任何时刻可跑。
+  local change="$1"
+  require_change_dir "$change"
+  close_gate "$change"
+  echo "==> lint 通过: $change"
+}
+
+ready_changes() {
+  # 与 harness status 共用 harness_state 的状态投影，不新建第二份推导。
+  "$(resolve_python)" .harness/scripts/harness_checks.py ready "$@"
+}
+
+next_action() {
+  "$(resolve_python)" .harness/scripts/harness_checks.py next "$@"
+}
+
+check_step() {
+  # 按 step id 写入验证结论，格式由命令保证。
+  "$(resolve_python)" .harness/scripts/harness_verification.py set "$@"
+}
+
+roles_cmd() {
+  # 角色档案只提供 operator 与备注模板；它不写 evaluated_by，也写不了。
+  "$(resolve_python)" .harness/scripts/harness_roles.py "${@:-list}"
+}
+
+render_verification() {
+  # 默认紧凑视图；--full 展开全部判定契约与迁移原文。
+  "$(resolve_python)" .harness/scripts/harness_verification.py render "$@"
+}
+
+autoclose_ready() {
+  # 就绪即自动归档：不要求人工逐个确认归档动作。
+  # 每个 change 仍然走完整 close（verify + 共享门槛 + ratchet tag），就绪度只
+  # 决定"要不要触发"，不决定"能不能通过"。
+  local python_bin dry_run
+  python_bin="$(resolve_python)"
+  dry_run="$1"
+
+  local ready
+  ready="$("$python_bin" .harness/scripts/harness_checks.py ready --json \
+    | "$python_bin" -c 'import json,sys; print(" ".join(i["change"] for i in json.load(sys.stdin)["ready"]))')"
+
+  if [ -z "$ready" ]; then
+    echo "==> 没有就绪的 change，无需归档"
+    return 0
+  fi
+
+  for change in $ready; do
+    if [ "$dry_run" = "1" ]; then
+      echo "==> [dry-run] 将自动归档: $change"
+      continue
+    fi
+    echo "==> 自动归档: $change"
+    close_change "$change" 0 0
+  done
+}
+
+create_ratchet_tag() {
+  local change="$1"
+  local tag="harness/pre-close/$change"
+
+  if ! command -v git >/dev/null 2>&1; then
+    fail "缺少 git：自动归档必须能建立回滚点，拿不到 git 就不允许归档"
+  fi
+  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1; then
+    git tag -d "$tag" >/dev/null
+  fi
+  git tag -a "$tag" -m "归档 $change 之前的可回滚点" \
+    || fail "无法建立回滚点 $tag；自动归档在没有回滚点时必须中止"
+  echo "==> 回滚点: $tag（回滚用 git reset --hard $tag）"
+}
+
 close_change() {
   local change="$1"
+  local skip_specs="$2"
+  local no_probe="$3"
 
-  verify_change "$change"
-  check_tasks_complete "$change"
-  check_human_checks_clear "$change"
-  check_quality_docs_decision "$change"
+  verify_change "$change" "$no_probe"
+  close_gate "$change"
+
+  # 先建回滚点再归档：归档会移动目录并改写 openspec/specs/，没有回滚点就不可退。
+  create_ratchet_tag "$change"
 
   echo "==> 归档变更: $change"
-  openspec archive "$change"
+  # -y 保证在无终端输入的 agent 会话中不会卡在交互确认上。
+  if [ "$skip_specs" = "1" ]; then
+    openspec archive "$change" -y --skip-specs
+  else
+    openspec archive "$change" -y
+  fi
+
+  echo "==> 收尾 current.json"
+  finalize_close "$change"
+
+  # 归档会把 delta spec 落进 openspec/specs/，能力索引随之过期；不在这里同步，
+  # 下一次 verify 必然在 sync-feature-index --check 处失败。
+  echo "==> 同步能力索引"
+  "$(resolve_python)" .harness/scripts/sync-feature-index.py
+
+  # 归档结果必须落进一个提交，否则 ratchet 是假的：`openspec archive` 产生的
+  # 归档目录与新 spec 目录都是**未跟踪**文件，`git reset --hard <tag>` 根本不
+  # 碰它们，回滚后它们仍在原地。那是部分回滚——比不能回滚更危险，因为它让人
+  # 以为已经退回。提交之后，tag 到 HEAD 之间是一个干净的差异，reset 才真的还原。
+  commit_archive "$change"
 
   echo "==> close 完成: $change"
 }
 
-reset_current() {
-  local current_file=".harness/current.json"
-  local today
-  today="$(date +%F)"
+commit_archive() {
+  local change="$1"
+  command -v git >/dev/null 2>&1 || fail "缺少 git：归档结果必须可提交，否则回滚点无效"
 
-  mkdir -p "$(dirname "$current_file")"
-  cat > "$current_file" <<EOF
-{
-  "schema_version": 1,
-  "active_change": null,
-  "candidate_changes": [],
-  "current_task": null,
-  "last_verified_task": null,
-  "working_files": [],
-  "blockers": [],
-  "next_action": null,
-  "dirty_assumptions": [],
-  "last_checkpoint": null,
-  "last_updated": "$today"
+  git add -A openspec .harness >/dev/null
+  if git diff --cached --quiet; then
+    echo "==> 归档无内容变化，跳过提交"
+    return 0
+  fi
+  git commit -q -m "Archive $change" \
+    || fail "归档结果提交失败；此时 ratchet 不成立，请人工处理"
+  echo "==> 归档结果已提交（回滚用 harness rollback $change）"
 }
-EOF
 
-  echo "==> 已清空 $current_file"
+rollback_change() {
+  # 单条命令把仓库退回归档之前。
+  local change="$1"
+  local tag="harness/pre-close/$change"
+
+  require_command git
+  git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1 \
+    || fail "找不到回滚点 $tag"
+
+  local dirty
+  dirty="$(git status --porcelain)"
+  if [ -n "$dirty" ]; then
+    fail "工作树不干净，回滚会丢弃这些改动；请先提交或清理：
+$dirty"
+  fi
+
+  echo "==> 回滚到 $tag"
+  git reset --hard "$tag"
+
+  # 提交之后归档产物都是已跟踪内容，reset 即可还原；这里再断言一次，
+  # 残留未跟踪文件说明 close 没有提交成功，属于部分回滚，必须报错。
+  local residue
+  residue="$(git status --porcelain)"
+  if [ -n "$residue" ]; then
+    fail "回滚后仍有残留，属于部分回滚：
+$residue"
+  fi
+  echo "==> 回滚完成，工作树干净"
+}
+
+reset_current() {
+  # schema 定义只存在于 harness_state.py，两个平台脚本都不再各写一份字面量 JSON。
+  "$(resolve_python)" .harness/scripts/harness_state.py reset-current
+}
+
+sync_candidates() {
+  "$(resolve_python)" .harness/scripts/harness_state.py sync-candidates
+}
+
+finalize_close() {
+  "$(resolve_python)" .harness/scripts/harness_state.py finalize-close "$1"
 }
 
 command_name="${1:-}"
-change="${2:-}"
+shift || true
+
+# check 是透传命令：它的位置参数与选项由 harness_verification.py 解析，
+# 在这里再解析一遍等于维护第二份参数契约。
+if [ "$command_name" = "check" ]; then
+  [ "$#" -ge 3 ] || { usage; fail "check 需要 <change> <step> <status>"; }
+  check_step "$@"
+  exit $?
+fi
+
+# roles 同理透传给 harness_roles.py。
+if [ "$command_name" = "roles" ]; then
+  roles_cmd "$@"
+  exit $?
+fi
+
+change=""
+skip_specs=0
+as_json=0
+no_probe=0
+dry_run=0
+full=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --skip-specs)
+      skip_specs=1
+      ;;
+    --json)
+      as_json=1
+      ;;
+    --no-probe)
+      no_probe=1
+      ;;
+    --dry-run)
+      dry_run=1
+      ;;
+    --full)
+      full=1
+      ;;
+    -*)
+      usage
+      fail "未知选项: $1"
+      ;;
+    *)
+      [ -z "$change" ] || { usage; fail "只能指定一个 change: $change / $1"; }
+      change="$1"
+      ;;
+  esac
+  shift
+done
 
 if [ -z "$command_name" ]; then
   usage
   exit 2
 fi
 
+if [ "$skip_specs" = "1" ] && [ "$command_name" != "close" ]; then
+  usage
+  fail "--skip-specs 只能与 close 一起使用"
+fi
+
 case "$command_name" in
+  status|ready|next) ;;
+  *)
+    if [ "$as_json" = "1" ]; then
+      usage
+      fail "--json 只能与 status / ready / next 一起使用"
+    fi
+    ;;
+esac
+
+if [ "$dry_run" = "1" ] && [ "$command_name" != "autoclose" ]; then
+  usage
+  fail "--dry-run 只能与 autoclose 一起使用"
+fi
+
+if [ "$no_probe" = "1" ] && [ "$command_name" != "verify" ] && [ "$command_name" != "close" ]; then
+  usage
+  fail "--no-probe 只能与 verify 或 close 一起使用"
+fi
+
+case "$command_name" in
+  status)
+    [ -z "$change" ] || { usage; fail "status 不接受 change 参数"; }
+    show_status "$as_json"
+    ;;
+  autoclose)
+    [ -z "$change" ] || { usage; fail "autoclose 不接受 change 参数"; }
+    autoclose_ready "$dry_run"
+    ;;
+  ready)
+    [ -z "$change" ] || { usage; fail "ready 不接受 change 参数"; }
+    if [ "$as_json" = "1" ]; then ready_changes --json; else ready_changes; fi
+    ;;
+  next)
+    [ -z "$change" ] || { usage; fail "next 不接受 change 参数"; }
+    if [ "$as_json" = "1" ]; then next_action --json; else next_action; fi
+    ;;
+  lint)
+    [ -n "$change" ] || { usage; fail "lint 需要 <change>"; }
+    lint_change "$change"
+    ;;
+  rollback)
+    [ -n "$change" ] || { usage; fail "rollback 需要 <change>"; }
+    rollback_change "$change"
+    ;;
+  render)
+    [ -n "$change" ] || { usage; fail "render 需要 <change>"; }
+    if [ "$full" = "1" ]; then render_verification "$change" --full; else render_verification "$change"; fi
+    ;;
+  sync-candidates)
+    [ -z "$change" ] || { usage; fail "sync-candidates 不接受 change 参数"; }
+    sync_candidates
+    ;;
   verify)
     [ -n "$change" ] || { usage; fail "verify 需要 <change>"; }
-    verify_change "$change"
+    verify_change "$change" "$no_probe"
     ;;
   close)
     [ -n "$change" ] || { usage; fail "close 需要 <change>"; }
-    close_change "$change"
+    close_change "$change" "$skip_specs" "$no_probe"
     ;;
   reset-current)
     reset_current

@@ -10,6 +10,7 @@
 .harness/templates/
 .harness/checkpoints/README.md
 .harness/evidence/README.md
+.harness/roles.json
 .harness/update-manifest.txt
 board.cmd
 board.sh

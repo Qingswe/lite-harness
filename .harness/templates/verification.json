@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "change": "<change-id>",
+  "baseline_commit": null,
+  "environment": {
+    "os": null,
+    "unity": null,
+    "date": null
+  },
+  "note": "不要预填「通过」。只记录已经运行并可复查的结果。",
+  "steps": [
+    {
+      "id": "V1",
+      "role": "evaluator",
+      "tasks": [],
+      "rule": "R1",
+      "how": "可复现的命令或检查方式",
+      "pass_when": "可证伪的正面判据",
+      "fail_when": "最可能出现的那种错法；不得是 pass_when 的取反",
+      "status": "pending",
+      "operator": null,
+      "date": null,
+      "evaluated_by": null,
+      "evidence": [],
+      "note": null
+    },
+    {
+      "id": "V2",
+      "role": "human",
+      "tasks": [],
+      "rule": "R2",
+      "observe": "具体到文件路径、场景名、格坐标或界面位置",
+      "pass_when": "可证伪的正面判据",
+      "fail_when": "最可能出现的那种错法；不得是 pass_when 的取反",
+      "needs_human_because": "为什么 AI 不能为它产出可复查证据",
+      "status": "pending",
+      "operator": null,
+      "date": null,
+      "evaluated_by": null,
+      "evidence": [],
+      "note": null
+    }
+  ],
+  "uncovered": [],
+  "quality_docs": {
+    "prescreen_run": null,
+    "triggered": []
+  },
+  "conclusion": {
+    "status": "pending",
+    "note": null
+  }
+}

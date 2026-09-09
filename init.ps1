@@ -20,18 +20,46 @@ function Show-Usage {
     Write-Output "  Use .\.harness\scripts\harness.ps1 verify|close <change> for verification and archive."
     Write-Output ""
     Write-Output "Optional environment variables:"
+    Write-Output "  SKIP_OPENSPEC_LIST=1      Skip openspec list (caller already validated)"
+    Write-Output "  UNITY_PROJECT_DIR=<path>  Unity subproject directory (default UnityProject/)"
     Write-Output "  UNITY_BIN=<path>          Override Unity executable"
-    Write-Output "  REQUIRE_UNITY_PROJECT=1   Fail when current directory is not a Unity project"
+    Write-Output "  REQUIRE_UNITY_PROJECT=1   Fail when no Unity project can be found"
     Write-Output "  RUN_UNITY_IMPORT=1        Run Unity import/compile"
     Write-Output "  RUN_EDITMODE=1            Run EditMode tests"
     Write-Output "  RUN_PLAYMODE=1            Run PlayMode tests"
     Write-Output "  RUN_START_COMMAND=1       Open Unity editor"
 }
 
-function Test-UnityProject {
-    return (Test-Path "Assets" -PathType Container) `
-        -and (Test-Path "Packages\manifest.json" -PathType Leaf) `
-        -and (Test-Path "ProjectSettings" -PathType Container)
+function Test-UnityProject([string]$CandidatePath) {
+    return (Test-Path (Join-Path $CandidatePath "Assets") -PathType Container) `
+        -and (Test-Path (Join-Path $CandidatePath "Packages\manifest.json") -PathType Leaf) `
+        -and (Test-Path (Join-Path $CandidatePath "ProjectSettings") -PathType Container)
+}
+
+function Resolve-UnityProjectDir {
+    if (-not [string]::IsNullOrWhiteSpace($env:UNITY_PROJECT_DIR)) {
+        $Candidate = $env:UNITY_PROJECT_DIR
+        if (-not [System.IO.Path]::IsPathRooted($Candidate)) {
+            $Candidate = Join-Path $RootDir $Candidate
+        }
+
+        if (-not (Test-UnityProject $Candidate)) {
+            throw "Error: UNITY_PROJECT_DIR is not a Unity project: $Candidate"
+        }
+
+        return (Resolve-Path $Candidate).Path
+    }
+
+    if (Test-UnityProject $RootDir) {
+        return $RootDir.Path
+    }
+
+    $NestedProject = Join-Path $RootDir "UnityProject"
+    if (Test-UnityProject $NestedProject) {
+        return (Resolve-Path $NestedProject).Path
+    }
+
+    return $null
 }
 
 function Resolve-UnityBin {
@@ -79,7 +107,10 @@ if ($Command -in @("help", "--help", "-h")) {
 
 Write-Output "==> Current directory: $PWD"
 
-if (Get-Command "openspec" -ErrorAction SilentlyContinue) {
+if ($env:SKIP_OPENSPEC_LIST -eq "1") {
+    Write-Output "==> Skipping OpenSpec list (SKIP_OPENSPEC_LIST=1)"
+}
+elseif (Get-Command "openspec" -ErrorAction SilentlyContinue) {
     Write-Output "==> OpenSpec active changes"
     openspec list
 }
@@ -87,8 +118,10 @@ else {
     Write-Output "==> openspec not found; skipping OpenSpec probe"
 }
 
-if (-not (Test-UnityProject)) {
-    $Message = "Current directory is not a complete Unity project; Assets, Packages\manifest.json, or ProjectSettings is missing."
+$UnityProjectDir = Resolve-UnityProjectDir
+
+if ([string]::IsNullOrWhiteSpace($UnityProjectDir)) {
+    $Message = "No Unity project found at repo root or UnityProject/."
     if (Test-EnvFlag "REQUIRE_UNITY_PROJECT") {
         throw "Error: $Message"
     }
@@ -97,6 +130,8 @@ if (-not (Test-UnityProject)) {
     Write-Output "==> Treating this as a template/docs repository; skipping Unity import and tests."
     return
 }
+
+Write-Output "==> Unity project: $UnityProjectDir"
 
 $UnityBin = Resolve-UnityBin
 if ([string]::IsNullOrWhiteSpace($UnityBin)) {
@@ -113,22 +148,22 @@ if ([string]::IsNullOrWhiteSpace($UnityBin)) {
 Write-Output "==> Unity editor: $UnityBin"
 
 if (Test-EnvFlag "RUN_UNITY_IMPORT") {
-    Invoke-Unity $UnityBin @("-batchmode", "-quit", "-nographics", "-projectPath", $RootDir, "-logFile", "-")
+    Invoke-Unity $UnityBin @("-batchmode", "-quit", "-nographics", "-projectPath", $UnityProjectDir, "-logFile", "-")
 }
 
 if (Test-EnvFlag "RUN_EDITMODE") {
-    Invoke-Unity $UnityBin @("-batchmode", "-nographics", "-projectPath", $RootDir, "-runTests", "-testPlatform", "EditMode", "-testResults", (Join-Path $RootDir "test-results-editmode.xml"), "-logFile", "-")
+    Invoke-Unity $UnityBin @("-batchmode", "-nographics", "-projectPath", $UnityProjectDir, "-runTests", "-testPlatform", "EditMode", "-testResults", (Join-Path $RootDir "test-results-editmode.xml"), "-logFile", "-")
 }
 
 if (Test-EnvFlag "RUN_PLAYMODE") {
-    Invoke-Unity $UnityBin @("-batchmode", "-projectPath", $RootDir, "-runTests", "-testPlatform", "PlayMode", "-testResults", (Join-Path $RootDir "test-results-playmode.xml"), "-logFile", "-")
+    Invoke-Unity $UnityBin @("-batchmode", "-projectPath", $UnityProjectDir, "-runTests", "-testPlatform", "PlayMode", "-testResults", (Join-Path $RootDir "test-results-playmode.xml"), "-logFile", "-")
 }
 
 Write-Output "==> Unity start command:"
-Write-Output "    `"$UnityBin`" -projectPath `"$RootDir`""
+Write-Output "    `"$UnityBin`" -projectPath `"$UnityProjectDir`""
 
 if (Test-EnvFlag "RUN_START_COMMAND") {
-    & $UnityBin -projectPath $RootDir
+    & $UnityBin -projectPath $UnityProjectDir
     if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
         throw "Error: Unity start failed with exit code $LASTEXITCODE"
     }

@@ -13,7 +13,7 @@
 
 请遵守以下规则：
 
-1. 读取 `AGENTS.md` / `CLAUDE.md`、`ARCHITECTURE.md`、`docs/quality/risks.md`、当前 active change 的 `quality-contract.md`。
+1. 读取 `AGENTS.md` / `CLAUDE.md`、`ARCHITECTURE.md`、`docs/quality/risks.md`、当前 active change 的 `program.md`。
 2. 运行并记录：
    - `pwd`
    - `git status --short`

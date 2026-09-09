@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Harness 运行产物
+test-results-editmode.xml
+test-results-playmode.xml
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
