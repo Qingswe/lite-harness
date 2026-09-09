@@ -4,7 +4,7 @@
 
 ## 默认：日常协作
 
-复制模板并合并项目规则，填写 `ARCHITECTURE.md`，确认本次目标和验证方式即可开始。无需 OpenSpec 初始化、active 执行槽、verification JSON 或每轮更新 current。
+复制模板并合并项目规则，填写 `ARCHITECTURE.md`，确认本次目标和验证方式即可开始。无需 OpenSpec 初始化、verification JSON 或执行状态副本。
 
 局部修复直接实现和验证；复杂行为先用项目已有设计文档澄清目标、非目标和验收。代码和测试描述实际实现，产品约定只维护一份，从架构入口链接。CI、测试输出和 PR 已有证据直接引用。
 
@@ -18,17 +18,23 @@
 
 需要队列调度、独立评估和自动归档时，安装 OpenSpec CLI 并执行 `openspec init`。为候选 change 准备 proposal、必要的 design、spec 增量和 tasks，从 `.harness/templates/` 准备 `program.md` 与 `verification.json`。按 `CLAUDE.md` 和 `.harness/program.md` 执行。
 
-- `harness status`：恢复状态、漂移与近期提交；`sync-candidates` 从实际目录同步候选集合。
-- `harness next`：给客户端下一项任务与角色；状态由脚本计算，客户端不重复推导。
+- `harness status`：直接查询 OpenSpec 任务、验证状态与近期提交，无需同步候选。
+- `harness next <change>`：查询指定 change 的下一项任务与角色；状态由脚本计算，客户端不重复推导。
 - `harness check` / `render`：记录评估结论 / 渲染供人阅读，事实来源为 JSON。
 - `harness ready` / `lint`：就绪度与完整门槛；`verify` 检查规格、结构并按契约决定 Unity 探针。
 - `harness autoclose` / `close`：通过完整门槛和回滚点后归档；`rollback` 恢复归档前状态。
 
 Unix 入口为 `.harness/scripts/harness`，Windows 为 `.harness/scripts/harness.ps1`，具体参数见各自 help。日常协作不调用这些归档入口。
 
-`.harness/current.json` 保留 schema、generator 身份、依赖与 per-change context，由循环工具维护派生状态，执行者只补无法推导的上下文；不要在普通会话更新它。`reset-current` 会清空状态，不是迁移或日常收尾步骤。`.harness/feature-index.json` 由 `sync-feature-index.py` 派生，人工只维护 overrides。
+不保存全局 active、候选、进度或当前任务。身份、依赖和明确阻塞按 `.harness/templates/program.md` 的格式写在 change 的 `program.md`，其他状态实时查询。已有 change 的评估和人工门槛继续保留；并行任务使用隔离工作区，查询结果不提供文件锁。
 
-现有 change 继续遵守全部既定要求，不能换成日常协作来跳过评估或人工步骤。日常任务若与其范围冲突，应回到对应 change；并发采用隔离工作区，active 不是文件锁。
+### 旧 current 迁移
+
+本模板已移除 `.harness/current.json`，运行时不读取、不覆盖它；reset-current、sync-candidates 和看板状态写入入口已移除。旧调用方应改用只读 status 和 `next <change>`。
+
+已采用项目升级前检查旧文件：把每个 change 的 `generated_by`、`depends_on`、仍有效的明确 blocker 移入对应 `program.md` 元数据块；只把无法重建的决定和下一步放进交接。不要迁移候选集合、任务进度、文件清单或 active。尚未表达在验证步骤中的人工约束必须保留为 blocker。对无法关联到 change 的内容先人工核对，不能直接丢弃。
+
+确认有效信息已转移后删除旧文件。查询不使用旧文件，旧文件存在也不会覆盖 OpenSpec 事实。归档时元数据随 change 一起归档，不需要第二次状态收尾。
 
 ## 验证与知识
 
@@ -38,6 +44,6 @@ Unix 入口为 `.harness/scripts/harness`，Windows 为 `.harness/scripts/harnes
 
 ## 升级与后台任务
 
-更新器保留项目自己的 agent 规则、状态和事实文件；升级后需手动合并新版 `CLAUDE.md` / `AGENTS.md`。保留已有 current、change、验证与历史记录，新任务按需要选择流程，无需批量迁移。
+更新器保留项目自己的 agent 规则、状态和事实文件；升级后需手动合并新版 `CLAUDE.md` / `AGENTS.md`。按上面的迁移说明转移旧状态中的有效信息，保留 change、验证与历史记录。
 
-后台 Prompt 位于 `docs/agents/`。未启用 OpenSpec、没有 active 或 current 未更新本身不是日常任务的故障。只读扫描保持只读，扫描发现不自动扩大实现授权；涉及已有 change 的修复遵守原流程。
+后台 Prompt 位于 `docs/agents/`。未启用 OpenSpec 本身不是日常任务的故障。只读扫描保持只读，扫描发现不自动扩大实现授权；涉及已有 change 的修复遵守原流程。

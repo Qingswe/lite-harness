@@ -159,7 +159,7 @@ def check_verification(change_id):
 # --------------------------------------------------------------------------
 
 def _is_field_accessor(raw):
-    """`.harness/current.json.active_change` 这类字段访问器不是路径。"""
+    """`.harness/roles.json.active_profile` 这类字段访问器不是路径。"""
     parts = raw.split(".")
     for cut in range(len(parts) - 1, 0, -1):
         prefix = ".".join(parts[:cut])
@@ -315,7 +315,7 @@ def changed_paths(change_id):
                 paths.add(name)
 
     # 正在实施的那个 change 还要算上未提交的工作树改动。
-    if change_id == active_change():
+    if change_id in harness_state.existing_change_ids():
         out = _git(["diff", "--name-only", "HEAD"]) or ""
         for name in out.splitlines():
             name = name.strip()
@@ -325,12 +325,7 @@ def changed_paths(change_id):
     return sorted(paths)
 
 
-def active_change():
-    harness_state.configure_root(ROOT)
-    data = harness_state.load_current()
-    if not isinstance(data, dict):
-        return None
-    return data.get("active_change")
+
 
 
 # 下限衡量的是实现风险，文档与产物不参与计算。
@@ -465,6 +460,9 @@ def check_role_isolation(change_id, generator_identity=None):
                             % step.get("id"))
             continue
         if agent == "human":
+            continue
+        if not gen_agent or not gen_model:
+            problems.append("步骤 %s 缺少 program.md 的 generated_by，实现身份未知，不能判定独立评估" % step.get("id"))
             continue
         if gen_agent and agent == gen_agent:
             problems.append(
@@ -623,9 +621,23 @@ def check_modified_scenarios(change_id):
     return problems
 
 
+def metadata_blockers(change_id):
+    try:
+        data = harness_state.harness_metadata.load(ROOT, change_id)
+    except (ValueError, OSError) as exc:
+        return [str(exc)]
+    problems = list(data.get("blockers", []))
+    archive = os.path.join(ROOT, "openspec", "changes", "archive")
+    archived = os.listdir(archive) if os.path.isdir(archive) else []
+    for dep in data.get("depends_on", []):
+        if dep in harness_state.existing_change_ids() or not any(n == dep or n.endswith("-" + dep) for n in archived):
+            problems.append("依赖尚未归档: " + dep)
+    return problems
+
+
 def close_gate(change_id):
     """close 与 lint 共用的门槛断言。两者 MUST 调用本函数，不得各写一份。"""
-    problems = list(check_change_files(change_id))
+    problems = list(check_change_files(change_id)) + metadata_blockers(change_id)
     if problems:
         return problems
     problems.extend(check_modified_scenarios(change_id))
@@ -678,6 +690,7 @@ def change_readiness(change, run_strict=True):
     """
     change_id = change["id"]
     blockers = list(harness_state.compute_readiness(change)["blockers"])
+    blockers.extend({"criterion": "metadata", "detail": p, "owner": "human"} for p in metadata_blockers(change_id))
 
     # 就绪度必须包含格式门槛，否则会出现「ready 说可以关、lint 说不行」的分裂：
     # 自动归档会先打 tag 再在 close 的门槛处中止，留下一个半途状态。
@@ -723,9 +736,7 @@ def frontmost_blocker(blockers):
 def build_ready_report(run_strict=True):
     harness_state.configure_root(ROOT)
     state = harness_state.build_state()
-    # 覆盖全部可发现的 change，不只是 current.json 里的候选：一个磁盘上真实存在
-    # 且已就绪的 change 若没被登记进候选，会对 ready 完全不可见，从而永远触发
-    # 不到自动归档。成员关系的漂移由 detect_drift 报告，不该在这里吞掉。
+    # 所有未归档 OpenSpec change 都参与查询，无需注册。
     changes = list(state["changes"])
 
     ready, blocked = [], []
@@ -769,11 +780,19 @@ def _order_by_dependency(ready):
     return ordered
 
 
-def build_next_action(run_strict=True):
+def build_next_action(run_strict=True, change_id=None):
     """循环的下一个动作：目标 change、目标 task 与应派出的角色。"""
     harness_state.configure_root(ROOT)
     state = harness_state.build_state()
-    active = next((c for c in state["changes"] if c["is_active"]), None)
+    if state["current"].get("parse_error"):
+        return {"action": "resolve", "change": change_id, "role": "generator",
+                "reason": state["current"]["parse_error"]}
+    active = next((c for c in state["changes"] if c["id"] == change_id), None)
+    if change_id and active is None:
+        return {"action": "resolve", "change": change_id, "role": "human", "reason": "找不到指定的 OpenSpec change"}
+    if active and active["recovery"]["blockers"]:
+        return {"action": "resolve", "change": change_id, "role": "human",
+                "reason": "; ".join(active["recovery"]["blockers"])}
 
     if active is None:
         report = build_ready_report(run_strict=run_strict)
@@ -781,8 +800,8 @@ def build_next_action(run_strict=True):
             return {"action": "close", "change": report["ready"][0]["change"],
                     "role": None,
                     "reason": "就绪度成立，自动归档；批量顺序见 harness ready"}
-        return {"action": "select-active", "change": None, "role": "human",
-                "reason": "没有 active change，需要人选定下一个要做什么"}
+        return {"action": "select-change", "change": None, "role": "human",
+                "reason": "用 harness next <change> 指定要查询的任务，无需保存执行槽"}
 
     if active.get("verification_error"):
         return {"action": "migrate", "change": active["id"], "role": "generator",
@@ -861,18 +880,11 @@ CHANGE_COMMANDS = ("gate", "verification", "roles", "probe-needed",
 
 
 def generator_identity(change_id):
-    """从 .harness/current.json 取本 change 的实现身份。
-
-    走状态层的 load_current，不自己再读一遍：current.json 的解析与迁移语义
-    只在 harness_state 一处。
-    """
-    harness_state.configure_root(ROOT)
-    data = harness_state.load_current()
-    if not isinstance(data, dict) or data.get("_parse_error"):
+    try:
+        return harness_state.harness_metadata.load(ROOT, change_id).get("generated_by", {})
+    except (ValueError, OSError):
         return {}
-    context = (data.get("change_context") or {}).get(change_id) or {}
-    identity = context.get("generated_by") or data.get("generated_by") or {}
-    return identity if isinstance(identity, dict) else {}
+
 
 
 def main(argv):
@@ -909,7 +921,7 @@ def main(argv):
     if needs_change and len(positional) != 1:
         sys.stderr.write(USAGE)
         return 2
-    if not needs_change and positional:
+    if (not needs_change and command != "next" and positional) or (command == "next" and len(positional) > 1):
         sys.stderr.write(USAGE)
         return 2
 
@@ -931,7 +943,7 @@ def main(argv):
         return 0
 
     if command == "next":
-        action = build_next_action(run_strict=run_strict)
+        action = build_next_action(run_strict=run_strict, change_id=positional[0] if positional else None)
         if as_json:
             print(json.dumps(action, ensure_ascii=False, indent=2))
         else:

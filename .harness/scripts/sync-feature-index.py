@@ -26,9 +26,9 @@ CHANGES_DIR = os.path.join(ROOT_DIR, "openspec", "changes")
 NOTE = (
     "能力索引，不是任务管理器。骨架由 .harness/scripts/sync-feature-index.py 从 "
     "openspec/specs/ 派生，人工只维护 overrides。产品行为以 openspec/specs/ 为准，"
-    "候选和 active 执行 change 以 openspec/changes/<id>/ 为准，唯一 active 执行槽以 "
-    ".harness/current.json.active_change 为准，验证证据以对应 change 的 "
-    "verification.md 和 .harness/evidence/ 为准。"
+    "任务与进度以 "
+    "openspec/changes/ 的实时查询为准，验证证据以对应 change 的 "
+    "verification.json 和 .harness/evidence/ 为准。"
 )
 
 OVERRIDE_FIELDS = ("title", "domain", "maturity", "quality", "last_verified_commit")

@@ -11,24 +11,22 @@ usage() {
 用法:
   .harness/scripts/harness status [--json]
   .harness/scripts/harness ready [--json]
-  .harness/scripts/harness next [--json]
+  .harness/scripts/harness next [<change>] [--json]
   .harness/scripts/harness autoclose [--dry-run]
   .harness/scripts/harness rollback <change>
   .harness/scripts/harness lint <change>
   .harness/scripts/harness check <change> <step> <status> [--by <人>]
                                  [--note <说明>] [--evidence <路径>] [--commit]
   .harness/scripts/harness render <change> [--full]
-  .harness/scripts/harness sync-candidates
   .harness/scripts/harness verify <change> [--no-probe]
   .harness/scripts/harness close <change> [--skip-specs] [--no-probe]
-  .harness/scripts/harness reset-current
   .harness/scripts/harness roles [list|use <id>|set <id> --operator <名>]
 
 说明:
-  status 一次输出会话恢复所需的执行状态：active 槽、候选 change 与 lifecycle
+  status 一次输出会话恢复所需的执行状态：OpenSpec change 与 lifecycle
          phase、blocker、next action、任务进度、证据数量、漂移告警和最近提交。
   ready  输出计算判定为可归档的 change，以及被阻塞项差的那一件事与责任方。
-         就绪度由七项判据共同推导，人工写入的 phase 只能收紧不能放宽。
+         就绪度由七项判据共同推导，明确阻塞和依赖同样阻塞归档。
   next   输出循环的下一个动作：目标 change、目标 task 与应派出的角色。
   autoclose 归档全部就绪的 change，按依赖顺序。就绪度成立即执行，不要求人工
          逐个确认；每个 change 仍然走完整 close 与 ratchet。--dry-run 只列出。
@@ -39,14 +37,11 @@ usage() {
          单独提交，从构造上保证它不与实现改动同处一个提交。
   render 把 verification.json 渲染成 markdown 供人阅读（事实来源仍是 JSON）。
          默认紧凑：只展开人工步骤与未通过步骤；--full 展开全部。
-  sync-candidates 按 openspec/changes/ 的实际内容重写候选集合；候选成员关系
-         不由人工维护，per-change context 原样保留。
   verify 负责 OpenSpec 严格校验、仓库结构检查（文档引用路径、skill 一致性、
          feature-index 同步），并按 program.md 与验证记录决定是否执行 Unity
          环境探针。
   close  在 verify 与门槛断言通过后建立回滚点 harness/pre-close/<change>，
          再执行 openspec archive。就绪度成立时由循环自动调用。
-  reset-current 清空 .harness/current.json，只保留可恢复的空执行槽。
 
 选项:
   --json        status / ready / next 以 JSON 输出，供脚本消费。
@@ -226,8 +221,6 @@ close_change() {
     openspec archive "$change" -y
   fi
 
-  echo "==> 收尾 current.json"
-  finalize_close "$change"
 
   # 归档会把 delta spec 落进 openspec/specs/，能力索引随之过期；不在这里同步，
   # 下一次 verify 必然在 sync-feature-index --check 处失败。
@@ -287,18 +280,8 @@ $residue"
   echo "==> 回滚完成，工作树干净"
 }
 
-reset_current() {
-  # schema 定义只存在于 harness_state.py，两个平台脚本都不再各写一份字面量 JSON。
-  "$(resolve_python)" .harness/scripts/harness_state.py reset-current
-}
 
-sync_candidates() {
-  "$(resolve_python)" .harness/scripts/harness_state.py sync-candidates
-}
 
-finalize_close() {
-  "$(resolve_python)" .harness/scripts/harness_state.py finalize-close "$1"
-}
 
 command_name="${1:-}"
 shift || true
@@ -397,8 +380,10 @@ case "$command_name" in
     if [ "$as_json" = "1" ]; then ready_changes --json; else ready_changes; fi
     ;;
   next)
-    [ -z "$change" ] || { usage; fail "next 不接受 change 参数"; }
-    if [ "$as_json" = "1" ]; then next_action --json; else next_action; fi
+    next_args=()
+    [ -z "$change" ] || next_args+=("$change")
+    [ "$as_json" != "1" ] || next_args+=(--json)
+    next_action "${next_args[@]}"
     ;;
   lint)
     [ -n "$change" ] || { usage; fail "lint 需要 <change>"; }
@@ -412,10 +397,6 @@ case "$command_name" in
     [ -n "$change" ] || { usage; fail "render 需要 <change>"; }
     if [ "$full" = "1" ]; then render_verification "$change" --full; else render_verification "$change"; fi
     ;;
-  sync-candidates)
-    [ -z "$change" ] || { usage; fail "sync-candidates 不接受 change 参数"; }
-    sync_candidates
-    ;;
   verify)
     [ -n "$change" ] || { usage; fail "verify 需要 <change>"; }
     verify_change "$change" "$no_probe"
@@ -423,9 +404,6 @@ case "$command_name" in
   close)
     [ -n "$change" ] || { usage; fail "close 需要 <change>"; }
     close_change "$change" "$skip_specs" "$no_probe"
-    ;;
-  reset-current)
-    reset_current
     ;;
   help|--help|-h)
     usage

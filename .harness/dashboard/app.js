@@ -111,7 +111,7 @@ function render() {
   renderContent();
   renderRoleSwitch();
   document.getElementById("meta").textContent =
-    "更新于 " + (STATE.current.last_updated || "—");
+    "数据来自 OpenSpec · 实时查询";
 }
 
 // 侧栏底部的角色切换。它只决定「预填谁」，不决定「谁做的判定」——
@@ -153,7 +153,7 @@ function renderNav() {
   (STATE.nav_tree || []).forEach(node => nav.appendChild(navNode(node)));
 }
 
-// 展开状态是显示偏好，不是可恢复状态，所以只存浏览器本地，不写 current.json。
+// 展开状态是显示偏好，不是可恢复状态，所以只存浏览器本地，不写 OpenSpec 状态。
 const OPEN_KEY = "harness-board-open";
 function openSet() {
   try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY)) || []); }
@@ -226,7 +226,7 @@ function renderContent() {
   box.appendChild(el("div", { class: "empty", text: "未找到内容。" }));
 }
 
-// ---------- 概览（current.json） ----------
+// ---------- 概览（OpenSpec 状态） ----------
 const OWNER_LABEL = { human: "人", ai: "AI", external: "外部" };
 
 async function loadReadyInto(box) {
@@ -274,20 +274,15 @@ async function loadReadyInto(box) {
 function renderOverview(box) {
   const c = STATE.current;
   pageHeader(box, { title: "概览",
-    sub: ".harness/current.json · schema v" + (c.schema_version || "?") });
+    sub: "openspec/changes/ · 实时查询" });
 
   (c.state_errors || []).forEach(msg =>
     box.appendChild(el("div", { class:"notice error", text:"状态错误： " + msg })));
-  if (c.migration_pending) {
-    const text = (c.migration_warnings || []).length
-      ? `检测到 ${c.migration_warnings.length} 条 legacy 状态；下一次有意的 current 写入将迁移为 schema v2。`
-      : "检测到 legacy current 状态；下一次有意写入将迁移为 schema v2。";
-    box.appendChild(el("div", { class:"notice", text }));
-  }
+
 
   const queues = STATE.queues || {};
   const queueDefs = [
-    ["active", "唯一执行槽"],
+    ["active", "实施中"],
     ["awaiting_human", "待人工检查"],
     ["awaiting_user_direction", "待用户指示"],
     ["ready_to_close", "可关闭"],
@@ -313,15 +308,8 @@ function renderOverview(box) {
   readyBox.appendChild(el("div", { class: "empty", text: "载入中…" }));
   loadReadyInto(readyBox);
 
-  const b = card(box, "当前恢复点");
-  b.appendChild(row("执行中", [ c.active_change
-    ? changeLink(c.active_change)
-    : el("span", { class: "pill none", text:
-        ((queues.awaiting_human||[]).length || (queues.awaiting_user_direction||[]).length)
-          ? "执行槽有意释放；待办已保存在下方阶段队列"
-          : "无 active change" }) ]));
-  if (c.active_change)
-    b.appendChild(row("操作", [currentButton("释放 active", "clear-active", null)]));
+  const b = card(box, "OpenSpec 任务概览");
+  b.appendChild(row("来源", [el("span", {text: "OpenSpec 任务与验证文件"})]));
   if (c.current_task) b.appendChild(row("当前任务", [el("span", { class:"cid", text: c.current_task })]));
   if (c.last_verified_task) b.appendChild(row("上次验证", [el("span", { class:"cid", text: c.last_verified_task })]));
   if (c.blockers && c.blockers.length)
@@ -425,16 +413,7 @@ function fold(summaryText, contentEl, onOpen) {
   if (onOpen) d.addEventListener("toggle", () => { if (d.open) onOpen(); }, { once: true });
   return d;
 }
-function currentButton(text, action, change) {
-  return el("button", { class: "btn", text, onclick: async () => {
-    const { res, data } = await api("/api/current", { action, change });
-    if (!res.ok) { toast("操作失败: " + (data.error || res.status), "err"); return; }
-    toast("已更新 current.json", "ok");
-    await load();
-  }});
-}
 
-// ---------- change 详情 ----------
 function renderChangeDetail(box, ch) {
   const tags = [];
   if (ch.is_active) tags.push(el("span", { class: "pill active", text: "执行中" }));
@@ -616,14 +595,6 @@ const ROLE_LABEL = r => ({ human:"需要人", evaluator:"自动验证",
 
 function renderChangeActions(ch) {
   const actions = [];
-  if (ch.is_active) {
-    actions.push(currentButton("释放 active", "clear-active", null));
-  } else {
-    actions.push(currentButton("设为 active", "set-active", ch.id));
-    actions.push(ch.is_candidate
-      ? currentButton("移出候选", "remove-candidate", ch.id)
-      : currentButton("加入候选", "add-candidate", ch.id));
-  }
   if (ch.lifecycle_phase === "ready_to_close")
     actions.push(el("span", { class:"pill ready", text:"请使用 harness close；看板不直接归档" }));
   return el("div", { class: "actions" }, actions);

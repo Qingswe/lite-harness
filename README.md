@@ -13,7 +13,7 @@
 复制完成后，请在目标项目根目录执行以下步骤：
 
 1. 合并项目已有的 agent 指令，按实际情况填写 `ARCHITECTURE.md`。
-2. 按 `CLAUDE.md` 的日常协作流程开始任务，无需安装 OpenSpec 或维护 `current.json`。选择自动循环时，再初始化 OpenSpec 并使用现有 harness 工具维护状态。
+2. 按 `CLAUDE.md` 的日常协作流程开始任务，无需安装 OpenSpec 或维护 `current.json`。选择自动循环时，再初始化 OpenSpec 并通过 harness 工具查询任务与验证状态。
 3. 参阅 [index.md](index.md) 了解变更创建、执行与归档的完整流程。
 4. 如需定期运行后台 Codex 任务，参阅 [docs/agents/README.md](docs/agents/README.md) 与 [docs/agents/background-codex-tasks.md](docs/agents/background-codex-tasks.md)。
 
@@ -21,7 +21,7 @@
 
 确认目标与 Git 状态，读取相关代码和约定，实施改动并运行必要验证，安全后提交。只有未完成工作需要交接时才创建 checkpoint；长期结论归入架构、ADR 或知识文档。有长期质量变化才更新质量记录，不为小任务生成整套文档。
 
-复杂变更先明确设计与验收，可选择 OpenSpec。接续已有 change 或运行自动循环时继续遵守原有质量契约和角色边界，不能绕过人工检查。保留的空 `current.json` 是兼容自动循环的模板，不是日常任务必须更新的状态。
+复杂变更先明确设计与验收，可选择 OpenSpec。接续已有 change 或运行自动循环时继续遵守原有质量契约和角色边界，不能绕过人工检查。任务与进度直接从 OpenSpec 查询，不再保存独立的 current 状态文件。
 
 ## 自动循环的信息来源（可选）
 
@@ -36,7 +36,7 @@
 | 项目原则 | `CLAUDE.md`（`AGENTS.md` 引用） |
 | 当前产品事实 | `openspec/specs/` |
 | 变更设计 | `openspec/changes/<id>/`（proposal、design、spec 增量、tasks） |
-| 执行状态 | `.harness/current.json`（唯一 active 执行槽、候选 change 与恢复点） |
+| 任务与进度 | 从 OpenSpec 的 tasks / verification 实时查询，不维护副本 |
 | 验证证据 | 对应 change 的 `verification.json`、`.harness/evidence/` |
 | 知识归档 | `openspec/archive/`、`docs/adr/`、`docs/knowledge/` |
 
@@ -61,24 +61,16 @@ openspec init
 
 ## 自动循环
 
-仅对进入自动循环的任务，使用 `harness status` 恢复状态，读取 active change 的设计、任务和评估规则，再由 `harness next` 分派 Generator / Evaluator。需要真实 Unity 验证时才运行环境探针。完整规则以 [CLAUDE.md](CLAUDE.md) 与 [.harness/program.md](.harness/program.md) 为准。
+仅对进入自动循环的任务，使用 `harness status` 查询任务，读取目标 change 的设计和评估规则，再由 `harness next <change>` 查询 Generator / Evaluator 的下一步。需要真实 Unity 验证时才运行环境探针。完整规则以 [CLAUDE.md](CLAUDE.md) 与 [.harness/program.md](.harness/program.md) 为准。
 
-### 执行规则
-
-- `openspec/changes/` 下可并存多个候选 change，但候选阶段仅做调研、proposal、design、spec 草案与 tasks 规划。
-- 同一时间仅允许一个 active 执行 change：`.harness/current.json` 中的 `active_change` 为唯一执行槽；仅该 change 可进行实现、更新 `openspec/specs/`、写入本轮自动验证证据。
-- 实现和自动验证已完成但仍等待人工检查的 change，可以从 active 执行槽释放出来，等 `verification.json` 中 `role: human` 的步骤被人工作答后由循环自动 close。
-- 无运行证据时不得标记任务完成；不得通过修改 `tasks.md` 勾选状态或削弱测试来掩盖未完成工作。
-- 归档由就绪度驱动：七项判据全部成立时 `harness autoclose` 自动执行，不需要人工逐个确认归档动作。取消的是归档动作的确认，不是人工步骤本身——任何未作答的 `role: human` 步骤都会让就绪度为假。任何情况下都不要直接调用 `openspec archive`。
-
-完整规则见 [AGENTS.md](AGENTS.md) 与 [CLAUDE.md](CLAUDE.md)。
+执行目标由调用参数指定，不维护 active 执行槽或候选列表。身份、依赖和明确阻塞仅写在对应 change 的 `program.md`，任务与验证状态实时派生。已有 change 保留角色隔离和全部验收门槛，规则见 [CLAUDE.md](CLAUDE.md)。
 
 ## 自动循环的 Harness 命令
 
 ```bash
-.harness/scripts/harness status            # active 槽、候选、blocker、next action、漂移，一次给全
+.harness/scripts/harness status            # 从 OpenSpec 查询任务进度、验证和阻塞
 .harness/scripts/harness ready             # 现在能归档哪些，其余各差哪一件事、责任方是谁
-.harness/scripts/harness next  --json      # 循环的下一个动作：哪个 change、哪条 task、该派哪个角色
+.harness/scripts/harness next <change> --json      # 循环的下一个动作：哪个 change、哪条 task、该派哪个角色
 .harness/scripts/harness lint  <change>    # 与 close 完全相同的门槛断言，但不归档，任何时刻可跑
 .harness/scripts/harness check <change> <step> <status> --commit
                                            # 按步骤标识写验证结论，单独成一个提交
@@ -116,13 +108,13 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 
 更新器默认从 `https://github.com/Qingswe/lite-harness.git` 的 `main` 分支读取 `.harness/update-manifest.txt`，只同步 harness 管理的脚本、看板、模板和流程说明文件。它不会默认覆盖项目事实或执行状态文件，例如 `AGENTS.md`、`CLAUDE.md`、`ARCHITECTURE.md`、`README.md`、`.harness/current.json`、`.harness/feature-index.json`、`openspec/` 与长期质量记录。
 
-升级已有项目时，需手动合并 `CLAUDE.md` / `AGENTS.md` 及 `.harness/program.md` 的适用范围 的日常协作规则；更新器不覆盖这些项目自有规则。不要删除旧 current、change 或验证记录来迁移，也不要取消已有验收要求。
+升级已有项目时，需手动合并 `CLAUDE.md` / `AGENTS.md` 及 `.harness/program.md` 的适用范围 的日常协作规则；更新器不覆盖这些项目自有规则。旧 current 中有效的身份、依赖和阻塞按 index.md 迁入 change 后移除，保留已有验收要求。
 
 实际同步时会先把被覆盖的文件备份到 `.harness/backups/harness-update-<timestamp>/`。可通过 `--ref <tag-or-branch>` / `-Ref <tag-or-branch>` 固定更新来源。
 
 ## 看板（Dashboard）
 
-本地网页工具，用于集中查看与勾选各 change 的任务项及人工检查项，手动设置 / 释放 active change，管理候选 change，并只读预览 checkpoint、验证记录、证据与质量文档：
+本地网页工具，用于集中查看与勾选各 change 的任务项及人工检查项，并只读预览 checkpoint、验证记录、证据与质量文档：
 
 ```powershell
 .\board.cmd            # Windows，默认端口 8777
@@ -145,7 +137,6 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 ├── board.cmd / board.sh       # 看板快捷启动
 ├── openspec/                  # 规格、变更设计与归档（由 OpenSpec 管理）
 ├── .harness/
-│   ├── current.json           # 当前恢复点（唯一 active 执行槽）
 │   ├── feature-index.json     # 能力索引（非任务管理器）
 │   ├── program.md             # 循环宪法：角色边界、归档策略、回滚规则与预算
 │   ├── templates/             # program / verification / checkpoint
@@ -172,7 +163,7 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 - 质量文档预筛已运行，被触发的条目均有人工理由。
 - 角色隔离校验通过：不存在同时改实现又把步骤置为终态的提交，且 `evaluated_by` 不等于本 change 的 generator 身份。
 
-这七项由 `harness ready` 计算，全部成立才自动归档。**人工写入的 lifecycle phase 只能收紧不能放宽**——声称可归档但计算判定未就绪时，采信计算结果并报告是哪一项判据。就绪度只驱动触发；`harness close` 仍执行完整门槛断言，就绪度误报时它是最后一道。
+这七项由 `harness ready` 计算，全部成立才自动归档。生命周期直接计算；program.md 中尚未解除的 blocker 和依赖同样阻塞归档。就绪度只驱动触发；`harness close` 仍执行完整门槛断言，就绪度误报时它是最后一道。
 
 ## 许可证
 

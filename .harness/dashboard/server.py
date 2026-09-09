@@ -3,7 +3,7 @@
 """Harness 看板后端。
 
 零依赖 Python stdlib HTTP 服务，集中展示并编辑：
-- .harness/current.json                   执行状态（含 working_files / dirty_assumptions / session_wrap_up）
+- openspec/changes/                     实时派生任务与验证状态
 - openspec/changes/<id>/tasks.md          任务复选框（可编辑）
 - /api/ready                              归档就绪度与阻塞归因（只读）
 - openspec/changes/<id>/verification.json 验证步骤（可编辑，按 step id 寻址）
@@ -43,7 +43,6 @@ from harness_state import (  # noqa: E402
     configure_root,
     read_doc,
     toggle_task,
-    update_current_state,
     update_verification_step,
 )
 
@@ -67,11 +66,11 @@ def __getattr__(name):
 # 「记得更新图」于是从纪律变成门槛。
 DATA_FLOW = (
     {"route": "/api/state", "method": "GET",
-     "reads": [".harness/current.json", "openspec/changes/",
+     "reads": ["openspec/changes/",
                ".harness/feature-index.json", "docs/", ".harness/evidence/"],
      "writes": []},
     {"route": "/api/ready", "method": "GET",
-     "reads": [".harness/current.json", "openspec/changes/"],
+     "reads": ["openspec/changes/"],
      "writes": []},
     {"route": "/api/doc", "method": "GET",
      "reads": ["openspec/changes/", ".harness/checkpoints/",
@@ -89,9 +88,6 @@ DATA_FLOW = (
     {"route": "/api/verification-step", "method": "POST",
      "reads": ["openspec/changes/"],
      "writes": ["openspec/changes/"]},
-    {"route": "/api/current", "method": "POST",
-     "reads": [".harness/current.json", "openspec/changes/"],
-     "writes": [".harness/current.json"]},
 )
 
 
@@ -348,10 +344,6 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": str(exc)}, 400)
                     return
                 self._send_json({"ok": True, "roles": state})
-                return
-            if self.path == "/api/current":
-                current = update_current_state(payload["action"], payload.get("change"))
-                self._send_json({"ok": True, "current": current})
                 return
             self._send_json({"error": "not found"}, 404)
         except (StateConflict, StateMigrationError) as exc:

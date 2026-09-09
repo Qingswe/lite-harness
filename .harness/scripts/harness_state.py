@@ -25,12 +25,12 @@ if _SELF_DIR not in sys.path:
     sys.path.insert(0, _SELF_DIR)
 
 import harness_verification as hv  # noqa: E402
+import harness_metadata
 
 ROOT = os.path.dirname(os.path.dirname(_SELF_DIR))
 
 # 这些随 ROOT 变化，由 configure_root() 设置。
 CHANGES_DIR = ""
-CURRENT_JSON = ""
 CHECKPOINTS_DIR = ""
 EVIDENCE_DIR = ""
 FEATURE_INDEX = ""
@@ -40,11 +40,10 @@ DOC_ALLOW = ()
 
 
 def configure_root(root):
-    global ROOT, CHANGES_DIR, CURRENT_JSON, CHECKPOINTS_DIR, EVIDENCE_DIR
+    global ROOT, CHANGES_DIR, CHECKPOINTS_DIR, EVIDENCE_DIR
     global FEATURE_INDEX, DOCS_DIR, DOC_ALLOW
     ROOT = os.path.abspath(root)
     CHANGES_DIR = os.path.join(ROOT, "openspec", "changes")
-    CURRENT_JSON = os.path.join(ROOT, ".harness", "current.json")
     CHECKPOINTS_DIR = os.path.join(ROOT, ".harness", "checkpoints")
     EVIDENCE_DIR = os.path.join(ROOT, ".harness", "evidence")
     FEATURE_INDEX = os.path.join(ROOT, ".harness", "feature-index.json")
@@ -83,42 +82,6 @@ GATED_PHASES = {
     "awaiting_human_and_user_direction",
     "blocked",
 }
-
-
-# current.json 的唯一 schema 定义。两个平台脚本的 reset-current 都从这里生成，
-# 不再各写一份字面量 JSON。
-CURRENT_STATE_FIELDS = (
-    "schema_version",
-    "active_change",
-    "candidate_changes",
-    "change_context",
-    "current_task",
-    "last_verified_task",
-    "working_files",
-    "deleted_files",
-    "blockers",
-    "next_action",
-    "dirty_assumptions",
-    "last_checkpoint",
-    "last_updated",
-    "last_change_note",
-    "verification_summary",
-)
-
-# 每个候选 change 的 context 只用这组结构化字段表达。
-CONTEXT_FIELDS = (
-    "summary",
-    "phase",
-    "blockers",
-    "next_action",
-    "depends_on",
-    "last_checkpoint",
-    "last_updated",
-    "generated_by",
-)
-
-# summary 只说明"为什么它还没进 active"；细节属于 proposal.md / design.md。
-CONTEXT_SUMMARY_MAX = 80
 
 
 class StateConflict(ValueError):
@@ -250,22 +213,18 @@ def parse_table_row(line):
 # 状态汇总
 # --------------------------------------------------------------------------
 
-def load_current():
-    if not os.path.isfile(CURRENT_JSON):
-        return {}
-    text, _ = read_text(CURRENT_JSON)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as exc:
-        return {"_parse_error": str(exc)}
-
-
-def save_current(current):
-    text, newline = read_text(CURRENT_JSON) if os.path.isfile(CURRENT_JSON) else ("", "\n")
-    _ = text  # 仅保留换行风格；JSON 统一格式化，避免手写状态漂移。
-    current["last_updated"] = date.today().isoformat()
-    data = json.dumps(current, ensure_ascii=False, indent=2)
-    write_lines(CURRENT_JSON, split_lines(data), newline)
+def project_state():
+    """Read-only compatibility projection from OpenSpec; no state file."""
+    contexts, errors = {}, []
+    ids = sorted(existing_change_ids())
+    for name in ids:
+        try:
+            contexts[name] = harness_metadata.load(ROOT, name)
+        except (ValueError, OSError) as exc:
+            errors.append(name + ": " + str(exc))
+    return {"schema_version": CURRENT_SCHEMA_VERSION, "active_change": None,
+            "candidate_changes": ids, "change_context": contexts,
+            "_parse_error": "; ".join(errors) or None}
 
 
 def require_change_exists(change_id):
@@ -306,91 +265,6 @@ def existing_change_ids():
         name for name in os.listdir(CHANGES_DIR)
         if name != "archive"
         and is_discoverable_change_dir(os.path.join(CHANGES_DIR, name))
-    }
-
-
-def _legacy_candidate(entry, valid_change_ids):
-    """Return (canonical id, annotation) or (None, None)."""
-    if not isinstance(entry, str):
-        return None, None
-    for change_id in sorted(valid_change_ids, key=len, reverse=True):
-        if entry == change_id:
-            return change_id, None
-        prefix = change_id + " ("
-        if entry.startswith(prefix) and entry.endswith(")"):
-            return change_id, entry[len(prefix):-1]
-    return None, None
-
-
-def normalize_current_state(current, valid_change_ids):
-    """Return a schema-v2 view without writing it.
-
-    Legacy annotated candidates are accepted only when their prefix resolves to
-    an existing change. Unknown entries are retained in the input object and
-    reported as errors so any mutation can refuse data loss.
-    """
-    normalized = copy.deepcopy(current)
-    warnings = []
-    errors = []
-    schema = current.get("schema_version", 1)
-    if not isinstance(schema, int) or schema < 1 or schema > CURRENT_SCHEMA_VERSION:
-        errors.append("Unsupported current.json schema_version: %r" % schema)
-
-    raw_context = current.get("change_context") or {}
-    if not isinstance(raw_context, dict):
-        errors.append("change_context must be an object")
-        raw_context = {}
-    contexts = copy.deepcopy(raw_context)
-    candidates = []
-    seen = set()
-
-    raw_candidates = current.get("candidate_changes") or []
-    if not isinstance(raw_candidates, list):
-        errors.append("candidate_changes must be an array")
-        raw_candidates = []
-    for entry in raw_candidates:
-        change_id, annotation = _legacy_candidate(entry, valid_change_ids)
-        if change_id is None:
-            errors.append("Unresolved candidate entry: %r" % entry)
-            continue
-        if annotation is not None and schema >= CURRENT_SCHEMA_VERSION:
-            errors.append("Schema v2 candidate is not canonical: %r" % entry)
-            continue
-        if annotation is not None:
-            warnings.append("Legacy candidate %s will migrate to canonical schema v2." % change_id)
-            context = contexts.setdefault(change_id, {})
-            prior = context.get("summary")
-            if prior and annotation != prior:
-                context["summary"] = prior + "\n\nLegacy annotation: " + annotation
-                warnings.append("Preserved existing context and legacy annotation for %s." % change_id)
-            elif not prior:
-                context["summary"] = annotation
-        if change_id not in seen:
-            candidates.append(change_id)
-            seen.add(change_id)
-
-    active = current.get("active_change")
-    if active is not None and active not in valid_change_ids:
-        errors.append("active_change does not resolve: %r" % active)
-    if active in seen:
-        warnings.append("Active change %s is also marked candidate." % active)
-
-    for change_id, context in list(contexts.items()):
-        if change_id not in valid_change_ids:
-            errors.append("change_context key does not resolve: %r" % change_id)
-        elif not isinstance(context, dict):
-            errors.append("change_context[%s] must be an object" % change_id)
-
-    normalized["schema_version"] = CURRENT_SCHEMA_VERSION
-    normalized["candidate_changes"] = candidates
-    normalized["change_context"] = contexts
-    return {
-        "state": normalized,
-        "migration_pending": schema != CURRENT_SCHEMA_VERSION or bool(
-            [w for w in warnings if w.startswith("Legacy candidate") or
-             w.startswith("Preserved existing")]),
-        "warnings": warnings,
-        "errors": errors,
     }
 
 
@@ -447,7 +321,7 @@ def derive_lifecycle(change, context, is_active):
 
     if is_active:
         derived = "implementing"
-    elif failed:
+    elif failed or context.get("blockers"):
         derived = "blocked"
     elif readiness["ready"]:
         derived = "ready_to_close"
@@ -455,6 +329,8 @@ def derive_lifecycle(change, context, is_active):
         derived = "awaiting_human"
     elif tasks_done:
         derived = "auto_verified"
+    elif progress["done"] > 0:
+        derived = "implementing"
     else:
         derived = "planned"
 
@@ -487,83 +363,6 @@ def derive_lifecycle(change, context, is_active):
         warnings.append("implementing change does not own the active slot.")
 
     return phase, source, warnings
-
-
-def _context_from_top_level(current, change_id, phase):
-    return {
-        "phase": phase,
-        "summary": (current.get("change_context") or {}).get(change_id, {}).get("summary"),
-        "blockers": list(current.get("blockers") or []),
-        "next_action": current.get("next_action"),
-        "last_checkpoint": current.get("last_checkpoint"),
-        "last_updated": current.get("last_updated") or date.today().isoformat(),
-    }
-
-
-def update_current_state(action, change_id=None):
-    loaded = load_current()
-    if loaded.get("_parse_error"):
-        raise ValueError("current.json 解析失败: %s" % loaded["_parse_error"])
-    result = normalize_current_state(loaded, existing_change_ids())
-    if result["errors"]:
-        raise StateMigrationError("; ".join(result["errors"]))
-    current = result["state"]
-    candidates = set(current.get("candidate_changes") or [])
-    previous_active = current.get("active_change")
-    contexts = current.setdefault("change_context", {})
-
-    if action == "set-active":
-        require_change_exists(change_id)
-        if previous_active and previous_active != change_id:
-            raise StateConflict(
-                "active slot is owned by %s; release it before activating %s" %
-                (previous_active, change_id))
-        current["active_change"] = change_id
-        candidates.discard(change_id)
-        context = contexts.setdefault(change_id, {})
-        context["phase"] = "implementing"
-        context["last_updated"] = date.today().isoformat()
-        if previous_active != change_id:
-            current["current_task"] = (
-                "继续执行 %s；读取 proposal.md、tasks.md、quality-contract.md 后推进 tasks。" %
-                change_id)
-            current["working_files"] = []
-            current["blockers"] = list(context.get("blockers") or [])
-            current["dirty_assumptions"] = []
-            current["last_checkpoint"] = context.get("last_checkpoint")
-            current["next_action"] = context.get("next_action") or current["current_task"]
-    elif action == "clear-active":
-        current["active_change"] = None
-        if previous_active:
-            change = build_change(previous_active)
-            prior_context = contexts.get(previous_active) or {}
-            phase, _source, _warnings = derive_lifecycle(change, prior_context, False)
-            if phase == "implementing":
-                phase, _source, _warnings = derive_lifecycle(change, {}, False)
-            contexts[previous_active] = _context_from_top_level(
-                current, previous_active, phase)
-            if phase in GATED_PHASES:
-                candidates.add(previous_active)
-            verification_summary = current.get("verification_summary")
-            if (isinstance(verification_summary, dict) and
-                    verification_summary.get("active_change") == previous_active):
-                verification_summary["active_change"] = None
-        current["current_task"] = None
-        current["working_files"] = []
-    elif action == "add-candidate":
-        require_change_exists(change_id)
-        if change_id == previous_active:
-            raise ValueError("active change 不需要候选标记")
-        candidates.add(change_id)
-    elif action == "remove-candidate":
-        require_change_exists(change_id)
-        candidates.discard(change_id)
-    else:
-        raise ValueError("未知 current 操作: %s" % action)
-
-    current["candidate_changes"] = sorted(candidates)
-    save_current(current)
-    return current
 
 
 def list_checkpoints(change_id):
@@ -1161,7 +960,7 @@ def build_dependency_graph(changes, contexts):
 
 
 def build_state():
-    loaded = load_current()
+    loaded = project_state()
     if loaded.get("_parse_error"):
         normalization = {
             "state": loaded,
@@ -1170,7 +969,7 @@ def build_state():
             "errors": [loaded["_parse_error"]],
         }
     else:
-        normalization = normalize_current_state(loaded, existing_change_ids())
+        normalization = {"state": loaded, "migration_pending": False, "warnings": [], "errors": []}
     current = normalization["state"]
     active = current.get("active_change")
     candidates = set(current.get("candidate_changes") or [])
@@ -1193,9 +992,10 @@ def build_state():
             c["lifecycle_warnings"] = lifecycle_warnings
             c["summary"] = context.get("summary")
             c["recovery"] = {
+                "depends_on": context.get("depends_on") or [],
                 "blockers": context.get("blockers") or [],
                 "next_action": context.get("next_action"),
-                "last_checkpoint": context.get("last_checkpoint"),
+                "last_checkpoint": (c["checkpoints"] or [None])[0],
                 "last_updated": context.get("last_updated"),
             }
             # Compatibility alias for older dashboard consumers. Execution and
@@ -1248,7 +1048,7 @@ def build_state():
             "state_errors": normalization["errors"],
         },
         "queues": {
-            "active": [c["id"] for c in changes if c["is_active"]],
+            "active": queue_ids("implementing"),
             "awaiting_human": queue_ids(
                 "awaiting_human", "awaiting_human_and_user_direction"),
             "awaiting_user_direction": queue_ids(
@@ -1412,175 +1212,19 @@ def read_doc(relpath):
 # 状态 schema 与收尾
 # --------------------------------------------------------------------------
 
-def empty_current_state():
-    """返回一个只含可恢复空执行槽的 current.json。"""
-    return {
-        "schema_version": CURRENT_SCHEMA_VERSION,
-        "active_change": None,
-        "candidate_changes": [],
-        "change_context": {},
-        "current_task": None,
-        "last_verified_task": None,
-        "working_files": [],
-        "deleted_files": [],
-        "blockers": [],
-        "next_action": None,
-        "dirty_assumptions": [],
-        "last_checkpoint": None,
-        "last_updated": date.today().isoformat(),
-        "last_change_note": None,
-        "verification_summary": None,
-    }
-
-
-def reset_current_state():
-    state = empty_current_state()
-    save_current(state)
-    return state
-
 
 def audit_change_context(current):
-    """检查 change_context 是否使用统一的结构化字段且摘要未超长。"""
-    problems = []
-    contexts = current.get("change_context") or {}
-    if not isinstance(contexts, dict):
-        return ["change_context 必须是对象"]
+    return [current["_parse_error"]] if current.get("_parse_error") else []
 
-    for change_id in sorted(contexts):
-        context = contexts[change_id]
-        if not isinstance(context, dict):
-            problems.append("%s: context 必须是对象" % change_id)
-            continue
-        unknown = sorted(set(context) - set(CONTEXT_FIELDS))
-        if unknown:
-            problems.append("%s: 未知 context 字段 %s" % (change_id, ", ".join(unknown)))
-        missing = [f for f in ("summary", "phase", "next_action") if f not in context]
-        if missing:
-            problems.append("%s: 缺少字段 %s" % (change_id, ", ".join(missing)))
-        summary = context.get("summary")
-        if isinstance(summary, str) and len(summary) > CONTEXT_SUMMARY_MAX:
-            problems.append(
-                "%s: summary %d 字符，超过上限 %d；细节请写进 proposal.md/design.md"
-                % (change_id, len(summary), CONTEXT_SUMMARY_MAX))
-        phase = context.get("phase")
-        if phase is not None and phase not in LIFECYCLE_PHASES:
-            problems.append("%s: 未知 phase %r" % (change_id, phase))
-        for field in ("blockers", "depends_on"):
-            value = context.get(field)
-            if value is not None and not isinstance(value, list):
-                problems.append("%s: %s 必须是数组" % (change_id, field))
-    return problems
-
-
-def sync_candidates():
-    """把候选集合重写为从 openspec/changes/ 派生的实际内容。
-
-    active change 不占候选位；已有的 per-change context 原样保留。
-    """
-    loaded = load_current()
-    if loaded.get("_parse_error"):
-        raise ValueError("current.json 解析失败: %s" % loaded["_parse_error"])
-
-    actual = existing_change_ids()
-    active = loaded.get("active_change")
-    derived = sorted(actual - ({active} if active else set()))
-    before = list(loaded.get("candidate_changes") or [])
-    loaded["candidate_changes"] = derived
-    save_current(loaded)
-    return {
-        "before": before,
-        "after": derived,
-        "added": sorted(set(derived) - set(before)),
-        "removed": sorted(set(before) - set(derived)),
-    }
-
-
-def finalize_close(change_id):
-    """归档成功后让 current.json 与结果保持一致。
-
-    摘除该 change 的候选与 context 条目；若它仍占着 active 执行槽则清空，
-    并把指向它的 verification_summary.active_change 一并置空。
-    """
-    loaded = load_current()
-    if loaded.get("_parse_error"):
-        raise ValueError("current.json 解析失败: %s" % loaded["_parse_error"])
-
-    removed = []
-    candidates = [c for c in (loaded.get("candidate_changes") or [])
-                  if c != change_id]
-    if len(candidates) != len(loaded.get("candidate_changes") or []):
-        removed.append("candidate_changes")
-    loaded["candidate_changes"] = candidates
-
-    contexts = loaded.get("change_context") or {}
-    if isinstance(contexts, dict) and change_id in contexts:
-        contexts.pop(change_id)
-        removed.append("change_context")
-    loaded["change_context"] = contexts
-
-    released_active = False
-    if loaded.get("active_change") == change_id:
-        loaded["active_change"] = None
-        loaded["current_task"] = None
-        loaded["working_files"] = []
-        released_active = True
-        removed.append("active_change")
-
-    # 已完成实现但已从 active 槽释放的 change 走的是另一条路径：它不在
-    # active_change 上，所以上面那段不会执行，而 current_task / next_action
-    # 仍然指着它。实测归档后 status 的「下一步」还在让人去复核一个已经不存在
-    # 的 change——「下一个动作与实际不符」正是就绪度判据要消灭的东西。
-    for field in ("current_task", "next_action"):
-        value = loaded.get(field)
-        if isinstance(value, str) and change_id in value:
-            loaded[field] = None
-            removed.append(field)
-
-    summary = loaded.get("verification_summary")
-    if isinstance(summary, dict) and summary.get("active_change") == change_id:
-        summary["active_change"] = None
-        removed.append("verification_summary.active_change")
-
-    save_current(loaded)
-    return {"change": change_id, "cleared": removed,
-            "released_active": released_active}
 
 # --------------------------------------------------------------------------
 # 会话恢复摘要（harness status）
 # --------------------------------------------------------------------------
 
 def detect_drift(raw_current, changes):
-    """比较 current.json 记录的成员关系与 openspec/changes/ 的实际内容。
-
-    候选集合的权威来源是实际存在的非归档 change 目录；current.json 只提供
-    per-change 的 override context。两者不一致时如实报告，不静默采用任一方。
-
-    必须传入 **未经规范化** 的 current.json：`normalize_current_state()` 会剥掉
-    无法解析的候选条目，规范化后的视图看不到指向已归档目录的陈旧条目。
-    """
-    actual = {c["id"] for c in changes}
-    active = raw_current.get("active_change")
-
-    recorded = set()
-    for entry in raw_current.get("candidate_changes") or []:
-        change_id, _annotation = _legacy_candidate(entry, actual)
-        recorded.add(change_id if change_id else entry)
-
-    contexts = set((raw_current.get("change_context") or {}).keys())
-
-    tracked = recorded | ({active} if active else set())
-    missing = sorted(actual - tracked)
-    stale = sorted(tracked - actual)
-    context_without_change = sorted(contexts - actual)
-    change_without_context = sorted(actual - contexts)
-
-    return {
-        "missing_from_current": missing,
-        "stale_in_current": stale,
-        "context_without_change": context_without_change,
-        "change_without_context": change_without_context,
-        "clean": not (missing or stale or context_without_change),
-    }
+    # Membership is read from OpenSpec on every request; there is no second list.
+    return {"missing_from_current": [], "stale_in_current": [],
+            "context_without_change": [], "change_without_context": [], "clean": True}
 
 
 def recent_commits(count=5):
@@ -1600,8 +1244,8 @@ def build_status(commit_count=5):
     state = build_state()
     current = state["current"]
     changes = state["changes"]
-    # 漂移检测读原始 current.json：规范化视图已经丢弃了无法解析的条目。
-    raw_current = load_current()
+    # Queries derive membership from OpenSpec on every request.
+    raw_current = project_state()
     drift = detect_drift(raw_current if not raw_current.get("_parse_error") else {},
                          changes)
 
@@ -1670,7 +1314,7 @@ def format_status(status):
         add("  证据: %d 份 | pending 人工检查: %d" % (
             active["evidence_count"], active["pending_checks"]))
     else:
-        add("Active 执行槽: 空（日常协作无需执行槽；自动循环实现前须选定 active change）")
+        add("执行目标不持久化；用 harness next <change> 查询目标任务")
     if status["current_task"]:
         add("当前 task: %s" % status["current_task"])
     if status["next_action"] and not active:
@@ -1706,12 +1350,12 @@ def format_status(status):
 
     drift = status["drift"]
     if drift["clean"]:
-        add("漂移检查: current.json 与 openspec/changes/ 一致")
+        add("数据来源: openspec/changes/（实时派生，无独立状态文件）")
     else:
         add("漂移检查: 不一致")
         for key, label in (
-                ("missing_from_current", "实际存在但 current.json 未记录"),
-                ("stale_in_current", "current.json 记录但目录不存在"),
+                ("missing_from_current", "查询中缺失"),
+                ("stale_in_current", "查询条目不存在"),
                 ("context_without_change", "change_context 指向不存在的 change")):
             if drift[key]:
                 add("  %s: %s" % (label, ", ".join(drift[key])))
@@ -1722,7 +1366,7 @@ def format_status(status):
     for err in status["state_errors"]:
         add("状态错误: %s" % err)
     if status["parse_error"]:
-        add("current.json 解析失败: %s" % status["parse_error"])
+        add("OpenSpec 元数据解析失败: %s" % status["parse_error"])
     if status["migration_pending"]:
         add("schema 迁移待写入: %s" % "; ".join(status["migration_warnings"]))
 
@@ -1735,97 +1379,22 @@ def format_status(status):
     return "\n".join(out)
 
 
-USAGE = """用法:
-  harness_state.py status [--json] [--root <path>]
-  harness_state.py sync-candidates [--root <path>]
-  harness_state.py finalize-close <change> [--root <path>]
-  harness_state.py reset-current [--root <path>]
-"""
-
-COMMANDS = ("status", "sync-candidates", "finalize-close", "reset-current")
-
+USAGE = "harness_state.py status [--json] [--root <path>]\n"
 
 def main(argv):
-    args = list(argv[1:])
-    command = args.pop(0) if args and not args[0].startswith("-") else "status"
-
-    as_json = False
-    root = None
-    positional = []
-    unknown = []
-    while args:
-        arg = args.pop(0)
-        if arg == "--json":
-            as_json = True
-        elif arg == "--root":
-            root = args.pop(0) if args else None
-            if root is None:
-                unknown.append("--root 缺少路径")
-        elif arg.startswith("--root="):
-            root = arg.split("=", 1)[1]
-        elif arg.startswith("-"):
-            unknown.append(arg)
-        else:
-            positional.append(arg)
-
-    if command not in COMMANDS or unknown:
-        sys.stderr.write(USAGE)
-        return 2
-    if as_json and command != "status":
-        sys.stderr.write("--json 只能与 status 一起使用\n")
-        return 2
-    if command == "finalize-close" and len(positional) != 1:
-        sys.stderr.write("finalize-close 需要且只需要一个 <change>\n")
-        return 2
-    if command != "finalize-close" and positional:
-        sys.stderr.write("%s 不接受位置参数: %s\n" % (command, " ".join(positional)))
-        return 2
-
-    if root:
-        if not os.path.isdir(root):
-            sys.stderr.write("错误: --root 不是目录: %s\n" % root)
-            return 2
-        configure_root(root)
-
-    if command == "sync-candidates":
-        result = sync_candidates()
-        if result["added"] or result["removed"]:
-            print("==> 候选集合已按 openspec/changes/ 重写")
-            for change_id in result["added"]:
-                print("    + %s" % change_id)
-            for change_id in result["removed"]:
-                print("    - %s" % change_id)
-        else:
-            print("==> 候选集合已与 openspec/changes/ 一致 (%d)" % len(result["after"]))
-        return 0
-
-    if command == "finalize-close":
-        result = finalize_close(positional[0])
-        if result["cleared"]:
-            print("==> current.json 已收尾 %s：清理 %s" % (
-                result["change"], ", ".join(result["cleared"])))
-        else:
-            print("==> current.json 无需收尾 %s" % result["change"])
-        return 0
-
-    if command == "reset-current":
-        reset_current_state()
-        print("==> 已清空 %s" % rel(CURRENT_JSON))
-        return 0
-
+    import argparse
+    parser = argparse.ArgumentParser(description="Read OpenSpec state")
+    parser.add_argument("command", choices=["status"], nargs="?", default="status")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--root")
+    args = parser.parse_args(argv[1:])
+    if args.root:
+        if not os.path.isdir(args.root):
+            parser.error("--root must be a directory")
+        configure_root(args.root)
     status = build_status()
-    if as_json:
-        print(json.dumps(status, ensure_ascii=False, indent=2))
-    else:
-        print(format_status(status))
-        for problem in status["context_problems"]:
-            print("context 问题: %s" % problem)
-
-    # 漂移、状态错误与解析失败会让下一轮会话恢复到错误前提上，视为失败。
-    if status["parse_error"] or status["state_errors"] or not status["drift"]["clean"]:
-        return 1
-    return 0
-
+    print(json.dumps(status, ensure_ascii=False, indent=2) if args.json else format_status(status))
+    return 1 if status["parse_error"] or status["state_errors"] else 0
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))

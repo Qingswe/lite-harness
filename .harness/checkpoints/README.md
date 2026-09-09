@@ -19,7 +19,7 @@
 
 checkpoint 只记录下一轮恢复所需的信息：
 
-- 当前 active OpenSpec change
+- 本次目标 OpenSpec change
 - 正在推进的 task
 - 已真实运行的验证
 - 未解决 blocker

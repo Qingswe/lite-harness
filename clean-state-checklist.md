@@ -11,7 +11,7 @@
 
 ## 自动循环补充
 
-- 状态由现有工具维护，候选与 active 的边界、角色隔离仍然成立。
+- 任务与验证查询反映实际 OpenSpec 文件，角色隔离仍然成立。
 - 需要交接时使用 `.harness/checkpoints/<change>/<YYYYMMDD>[-<label>].md`。
 - `harness lint <change>` 通过，共享门槛检查任务、证据、规则覆盖、角色隔离和质量预筛。
 - 没有由 AI 代答的人工步骤，未完成项仍然阻塞。

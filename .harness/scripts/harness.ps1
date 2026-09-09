@@ -27,29 +27,24 @@ function Show-Usage {
     Write-Output "Usage:"
     Write-Output "  .\.harness\scripts\harness.ps1 status [-Json]"
     Write-Output "  .\.harness\scripts\harness.ps1 ready [-Json]"
-    Write-Output "  .\.harness\scripts\harness.ps1 next [-Json]"
+    Write-Output "  .\.harness\scripts\harness.ps1 next [<change>] [-Json]"
     Write-Output "  .\.harness\scripts\harness.ps1 autoclose [-DryRun]"
     Write-Output "  .\.harness\scripts\harness.ps1 rollback <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 lint <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 render <change>"
     Write-Output "  .\.harness\scripts\harness.ps1 check <change> <step> <status> [--by <who>]"
     Write-Output "  .\.harness\scripts\harness.ps1 roles [list|use <id>|set <id> --operator <name>]"
-    Write-Output "  .\.harness\scripts\harness.ps1 sync-candidates"
     Write-Output "  .\.harness\scripts\harness.ps1 verify <change> [-NoProbe]"
     Write-Output "  .\.harness\scripts\harness.ps1 close <change> [-SkipSpecs] [-NoProbe]"
-    Write-Output "  .\.harness\scripts\harness.ps1 reset-current"
     Write-Output ""
     Write-Output "Description:"
-    Write-Output "  status prints the execution state needed to resume a session: active slot,"
+    Write-Output "  status prints the execution state needed to resume a session: OpenSpec changes,"
     Write-Output "         candidates with lifecycle phase, blockers, next action, task progress,"
     Write-Output "         evidence counts, drift warnings, and recent commits."
-    Write-Output "  sync-candidates rewrites candidate membership from openspec\changes\."
     Write-Output "  verify validates OpenSpec and required change files, runs repository structure"
     Write-Output "         checks (doc path references, skill consistency, feature-index sync), and"
     Write-Output "         runs the Unity probe based on program.md and the verification record."
     Write-Output "  close runs the shared gate, creates a rollback tag, runs openspec archive,"
-    Write-Output "        then finalizes .harness\current.json."
-    Write-Output "  reset-current clears .harness\current.json back to an empty execution slot."
     Write-Output ""
     Write-Output "Options:"
     Write-Output "  -Json       Emit status as JSON for scripted consumers."
@@ -197,8 +192,6 @@ function Invoke-Close([string]$ChangeId, [bool]$SkipSpecUpdates, [bool]$SkipProb
         Fail "OpenSpec archive failed for $ChangeId."
     }
 
-    Write-Output "==> Finalize current.json"
-    Invoke-StateCommand @("finalize-close", $ChangeId)
 
     # Archiving lands delta specs in openspec/specs/, which makes the capability
     # index stale; without this the next verify fails on the sync check.
@@ -293,8 +286,9 @@ function Invoke-Ready([bool]$AsJson) {
     if ((Invoke-CheckCommand $CheckArgs) -ne 0) { Fail "ready failed." }
 }
 
-function Invoke-Next([bool]$AsJson) {
+function Invoke-Next([bool]$AsJson, [string]$ChangeId) {
     $CheckArgs = @("next")
+    if ($ChangeId) { $CheckArgs += $ChangeId }
     if ($AsJson) { $CheckArgs += "--json" }
     if ((Invoke-CheckCommand $CheckArgs) -ne 0) { Fail "next failed." }
 }
@@ -305,9 +299,6 @@ function Invoke-Render([string]$ChangeId) {
     if ($LASTEXITCODE -ne 0) { Fail "render failed for $ChangeId." }
 }
 
-function Reset-Current {
-    Invoke-StateCommand @("reset-current")
-}
 
 function Invoke-CheckStep([string[]]$Args) {
     # 按 step id 写入验证结论，格式由命令保证。与 bash 侧同一份实现。
@@ -324,9 +315,6 @@ function Invoke-Roles([string[]]$Args) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-function Sync-Candidates {
-    Invoke-StateCommand @("sync-candidates")
-}
 
 if ([string]::IsNullOrWhiteSpace($Command)) {
     Show-Usage
@@ -369,11 +357,7 @@ switch ($Command) {
         Invoke-Ready ([bool]$Json)
     }
     "next" {
-        if (-not [string]::IsNullOrWhiteSpace($Change)) {
-            Show-Usage
-            Fail "next does not take a <change> argument."
-        }
-        Invoke-Next ([bool]$Json)
+        Invoke-Next ([bool]$Json) $Change
     }
     "autoclose" {
         if (-not [string]::IsNullOrWhiteSpace($Change)) {
@@ -402,14 +386,6 @@ switch ($Command) {
         Require-ChangeArg "close" $Change
         Invoke-Close $Change ([bool]$SkipSpecs) ([bool]$NoProbe)
     }
-    "sync-candidates" {
-        if (-not [string]::IsNullOrWhiteSpace($Change)) {
-            Show-Usage
-            Fail "sync-candidates does not take a <change> argument."
-        }
-        Sync-Candidates
-    }
-    "reset-current" { Reset-Current }
     "check" {
         $CheckArgs = @()
         if ($Change) { $CheckArgs += $Change }

@@ -11,7 +11,7 @@
 
 ## 适用范围
 
-本文件只约束采用自动循环的任务。日常协作按根目录 `CLAUDE.md` 执行，不要求创建 change、维护 current 或派独立 Evaluator。接续已有 change 时仍须遵守本文件，不能借工作方式切换绕过既定门槛。这里的“每轮”均指自动循环的一轮。
+本文件只约束采用自动循环的任务。日常协作按根目录 `CLAUDE.md` 执行，不要求创建 change 或派独立 Evaluator。接续已有 change 时仍须遵守本文件，不能借工作方式切换绕过既定门槛。这里的“每轮”均指自动循环的一轮。
 
 ## 1. 两条判据
 
@@ -42,7 +42,7 @@
 1. **提交级断言**——不存在同时把某步骤翻成 `passed` 又修改了实现文件的提交。
    与客户端无关，是最硬的一道。
 2. **身份校验**——`evaluated_by.{agent,model}` 必填，且不得等于本 change 的
-   generator 身份（记录在 `.harness/current.json`）。同模型自评被直接拒绝。
+   generator 身份（记录在该 change 的 `program.md` 的 `harness-metadata.generated_by`）。同模型自评被直接拒绝。
    这一道不需要 git，因此在任何上下文里都成立。
 
 **工具白名单不是承重项。** agent 定义里的 `tools` 能挡住直接的 Write/Edit，但
@@ -53,13 +53,15 @@ Evaluator 必须能跑命令，而 `Bash` 足以绕过它，仓库侧也检测�
 ## 3. 循环
 
 ```
-harness next --json      → 目标 change、目标 task、该派的角色
+harness next <change> --json      → 目标 change、目标 task、该派的角色
   ├─ role=generator      → 推进 tasks.md，写实现
   ├─ role=evaluator      → 按评估规则跑检查，写 verification.json 步骤结论与证据
   └─ 就绪度为真          → 打 ratchet tag → harness close（自动）→ 取下一个候选
 ```
 
-**状态归脚本，编排归客户端。** `harness next` 与 `harness ready` 与
+执行目标由调用参数指定，不保存 active 槽或候选集合。候选来自 OpenSpec 目录，进度来自任务和验证记录。`program.md` 中只补充无法推导的身份、依赖和阻塞；这些阻塞同样约束 ready 和 close。
+
+**查询归脚本，编排归客户端。** `harness next` 与 `harness ready` 与
 `harness status` 共用同一份状态投影；编排层不得自行推导执行状态或就绪度。
 
 ## 4. 归档
@@ -76,8 +78,7 @@ harness next --json      → 目标 change、目标 task、该派的角色
 6. 质量文档预筛已运行，被触发的条目均有人工理由。
 7. 角色隔离校验通过。
 
-人工写入的 lifecycle phase **只能收紧不能放宽**：人工更保守时采信人工，人工
-更宽松时采信计算结果并报告矛盾。
+生命周期由任务与验证记录推导，不手写 phase。需要暂停时在 `program.md` 的 `harness-metadata.blockers` 写原因；未清除的阻塞让 next、ready 和 close 都不能继续。
 
 ### 4.2 自动归档
 
@@ -108,7 +109,7 @@ harness next --json      → 目标 change、目标 task、该派的角色
 ## 6. 每轮必须留下的东西
 
 - `verification.json` 的步骤结论与真实存在的证据。
-- `.harness/current.json` 的恢复点。
+- 任务与验证事实写在对应 OpenSpec change；需要交接才写 checkpoint，不再维护额外的当前状态文件。
 - 仍然损坏或未验证的内容、未解决的风险或 blocker。
 
 没有可运行证据时不得声称完成；不得因为"代码已经写了"就勾掉任务；不得通过改

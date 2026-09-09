@@ -77,3 +77,13 @@
 的是**决定**，不是占位。
 
 - 
+
+## 可选执行事实
+
+只在需要身份隔离、依赖或明确阻塞时添加一个 `harness-metadata` JSON 代码块。仅支持 `generated_by`（含 agent/model）、`depends_on`（change ID 数组）、`blockers`（非空原因字符串数组）。Generator 身份必须在独立评估前记录；示例值应替换为真实身份。不保存 active、候选列表、phase、任务进度或工作文件。
+
+```harness-metadata
+{"generated_by": {"agent": "<generator-agent>", "model": "<generator-model>"}, "depends_on": [], "blockers": []}
+```
+
+依赖未归档、blocker 未解除或块格式错误时，ready / close 均拒绝继续。多个代码块不被接受。没有这些事实时不必创建该块；任务、证据和人工步骤仍从既有文件查询。

@@ -35,6 +35,11 @@ prescreen_mod = _load_prescreen()
 
 PROGRAM = """# Program — alpha
 
+```harness-metadata
+{"generated_by": {"agent": "generator", "model": "generator-model"}}
+```
+
+
 ## 风险等级
 
 - 等级：`low`
@@ -468,42 +473,6 @@ class ModifiedScenarioTests(LoopTestCase):
                             for p in harness_checks.close_gate("alpha")))
 
 
-class FinalizeCloseTests(LoopTestCase):
-    """归档后不得留下指向已归档 change 的下一个动作。"""
-
-    def write_current(self, payload):
-        (self.root / ".harness").mkdir(parents=True, exist_ok=True)
-        (self.root / ".harness" / "current.json").write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        harness_state.configure_root(str(self.root))
-
-    def test_pointer_cleared_even_when_not_active(self):
-        self.write_current({
-            "schema_version": 2, "active_change": None,
-            "candidate_changes": ["alpha", "beta"],
-            "change_context": {"alpha": {"summary": "s"}},
-            "current_task": "alpha：等待第四次人工判定",
-            "next_action": "人工复核 alpha 的材料",
-        })
-        result = harness_state.finalize_close("alpha")
-        loaded = harness_state.load_current()
-        self.assertIsNone(loaded["current_task"])
-        self.assertIsNone(loaded["next_action"])
-        self.assertEqual(["beta"], loaded["candidate_changes"])
-        self.assertFalse(result["released_active"])
-
-    def test_unrelated_pointer_survives(self):
-        self.write_current({
-            "schema_version": 2, "active_change": None,
-            "candidate_changes": ["alpha", "beta"],
-            "change_context": {},
-            "current_task": "beta：推进 3.1",
-            "next_action": "继续 beta",
-        })
-        harness_state.finalize_close("alpha")
-        loaded = harness_state.load_current()
-        self.assertEqual("beta：推进 3.1", loaded["current_task"])
-        self.assertEqual("继续 beta", loaded["next_action"])
 
 
 class DashboardStepWriteTests2(LoopTestCase):
