@@ -8,7 +8,9 @@
 
 局部修复直接实现和验证；复杂行为先用项目已有设计文档澄清目标、非目标和验收。代码和测试描述实际实现，产品约定只维护一份，从架构入口链接。CI、测试输出和 PR 已有证据直接引用。
 
-## 跨会话交接
+计划中的轻量化修改意见（RFC，尚未改变默认行为）见 [docs/proposals/](docs/proposals/README.md)。
+
+> 前提：本机已通过 Unity Hub 安装并激活目标 Unity 版本，项目已添加 Unity Test Framework 包，并有 EditMode / PlayMode 测试 assembly。
 
 仅为未完成且需要继续的工作创建 `.harness/checkpoints/<topic>/<YYYYMMDD>[-<label>].md`，从 `.harness/templates/checkpoint.md` 取用相关项。记录难以重建的约束、决定、失败尝试、阻塞和下一步。不要复制 Git 文件清单或任务表；完成后标记已完成，长期结论移入 ADR 或知识文档，旧时点记录不回溯改写。
 
