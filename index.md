@@ -10,6 +10,8 @@
 
 本文件只说明**每个文件是什么、放什么**。工作规则、权威来源链、工作循环、完成门槛和收尾步骤都以根目录 `CLAUDE.md` 为唯一权威源，这里不复制。
 
+计划中的轻量化修改意见（RFC，尚未改变默认行为）见 [docs/proposals/](docs/proposals/README.md)。
+
 > 前提：本机已通过 Unity Hub 安装并激活目标 Unity 版本，项目已添加 Unity Test Framework 包，并有 EditMode / PlayMode 测试 assembly。
 
 ## 推荐目录

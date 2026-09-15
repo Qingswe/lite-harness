@@ -167,6 +167,10 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 
 本项目采用 [Apache License 2.0](LICENSE) 发布。
 
+## 演进提案
+
+轻量化方向（SSOT + 证据与人工门禁为主，脚本/OpenSpec 仪式降为可选插件）见 [docs/proposals/2026-09-15-lite-harness-slim-down.md](docs/proposals/2026-09-15-lite-harness-slim-down.md)。
+
 ## 参考与致谢
 
 - [OpenSpec](https://github.com/Fission-AI/OpenSpec) — 规格与变更管理 CLI。
