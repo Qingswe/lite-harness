@@ -28,13 +28,41 @@ lite-harness 当前将 OpenSpec 变更管理与 `.harness` 脚本、看板、七
 | 主题 | 要求 |
 | --- | --- |
 | **SSOT** | 一种信息只有一个权威来源；目录约定清晰（原则 → 产品事实 → 变更设计 → 证据 → 归档）。 |
-| **实现 vs 评估分离** | 实现方与判定验证结论方在流程上分离（角色/模型边界）；禁止「自批作业」作为组织规则，而非必须用同一套 commit 机器门禁表达。 |
+| **实现 vs 评估分离** | 实现方与判定验证结论方在流程上分离（角色/模型边界）；禁止「自批作业」作为组织规则，而非必须用同一套 commit 机器门禁表达。角色分工不默认绑定双提交隔离脚本，见 **§2.1 Agent / 跨 session** 第 2 条。 |
 | **无证据不算完成** | 没有可核对证据时不得声称任务或变更完成；不得通过改 `tasks.md`、削弱 AC 或测试掩盖未完成工作。 |
 | **ADR** | 长期架构决策继续落在 `docs/adr/`，与 OpenSpec change / 证据可追溯。 |
-| **人工门禁（制片 / QA）** | Feature 状态看板（或等价权威状态文档）：**Decision Required 未澄清 → STOP**；**无 QA PASS 不得 Done**；谁有权改状态须在文档中写明。 |
-| **QA 主权** | CLI/看板**不能替代**人工 PASS/FAIL；工程师 smoke ≠ PASS；材料缺失 → **BLOCKED**；不得降低 AC；验收判断归 QA。 |
-| **设计门禁（系统设计）** | 规则先写清、AC 可测、工程师不必猜；**Spec 路径为玩法/行为权威**；Open Questions / DR 未关闭 → 非 Approved；应 STOP 回设计；脚手架不能代替「这条规则是否已决定？」。 |
-| **Agent 连续性** | 新会话从仓库内权威文档与 ROADMAP/交接行恢复，不依赖聊天记录。 |
+| **人工门禁（制片 / QA）** | Feature 状态看板（或等价权威状态文档）：**Decision Required 未澄清 → STOP**；**无 QA PASS 不得 Done**；谁有权改状态须在文档中写明。制片侧细则见 **§2.1 Producer**。 |
+| **QA 主权** | CLI/看板**不能替代**人工 PASS/FAIL；工程师 smoke ≠ PASS；材料缺失 → **BLOCKED**；不得降低 AC；验收判断归 QA。验收口径与输出边界见 **§2.1 QA**。 |
+| **设计门禁（系统设计）** | 规则先写清、AC 可测、工程师不必猜；**Spec 路径为玩法/行为权威**；Open Questions / DR 未关闭 → 非 Approved；应 STOP 回设计；脚手架不能代替「这条规则是否已决定？」。Approved Spec / AC 合同见 **§2.1 Systems Design**。 |
+| **Agent 连续性** | 新会话从仓库内权威文档与 ROADMAP/交接行恢复，不依赖聊天记录。跨 session 恢复与并行派单见 **§2.1 Agent / 跨 session**。 |
+
+### 2.1 角色补充条款
+
+以下条文为各角色在评审中**逐字确认的补充意图**，与 §2 表格一并构成 Must Keep；不得在本 RFC 之外自行扩展政策。
+
+#### Producer（小蓝）
+
+1. 只有 Producer 正式改 Backlog→Done，实现方不能自勾完成。
+2. Done 必须过 QA PASS，smoke ≠ PASS。
+3. Decision Required / Spec 未 Approved 时不得拆实现 Task。
+
+#### Agent / 跨 session（小青）
+
+1. 每轮恢复上下文只读权威 `docs/*` + 当前 Feature/ADR，不强制跑 OpenSpec CLI / `current.json` 仪式。
+2. Generator 与 Evaluator 用角色分工（实现 vs QA），不绑双提交隔离脚本。
+3. 单 active 执行槽改为可选，默认可并行候选调研，由 Producer 排队派单。
+
+#### QA（粉粉）
+
+1. 验收权威只认 Spec/AC 路径，冲突以 SPEC 为准。
+2. 工程师 smoke / Cloud 静态 ≠ PASS，缺证据或实机未跑就 BLOCKED。
+3. QA 只回 PASS/FAIL/BLOCKED，禁止降 AC、禁止改规则/自修后勾过。
+
+#### Systems Design（小灰）
+
+1. 玩法权威只认 Approved Spec 路径（如 `docs/specs/`），冲突以父 SPEC 为准，CLI/看板状态不能顶替规则正文。
+2. Decision Required / Open Questions 未关不得标 Approved，Engineer 遇未定义规则必须 STOP 打回 Design，禁止猜规则或为 Bug 改 Design。
+3. AC 是 Design↔实现↔QA 的合同，改核心规则走变更流程，不得用脚手架 autoclose 自动关掉 Open Question。
 
 ---
 
