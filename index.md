@@ -8,13 +8,15 @@
 
 局部修复直接实现和验证；复杂行为先用项目已有设计文档澄清目标、非目标和验收。代码和测试描述实际实现，产品约定只维护一份，从架构入口链接。CI、测试输出和 PR 已有证据直接引用。
 
-计划中的轻量化修改意见（RFC，尚未改变默认行为）见 [docs/proposals/](docs/proposals/README.md)。
+轻量化评审原文与增量采纳结论（默认日常协作及移除 current 已完成）见 [docs/proposals/](docs/proposals/README.md)。
 
 > 前提：本机已通过 Unity Hub 安装并激活目标 Unity 版本，项目已添加 Unity Test Framework 包，并有 EditMode / PlayMode 测试 assembly。
 
 仅为未完成且需要继续的工作创建 `.harness/checkpoints/<topic>/<YYYYMMDD>[-<label>].md`，从 `.harness/templates/checkpoint.md` 取用相关项。记录难以重建的约束、决定、失败尝试、阻塞和下一步。不要复制 Git 文件清单或任务表；完成后标记已完成，长期结论移入 ADR 或知识文档，旧时点记录不回溯改写。
 
 日常 topic 是稳定的任务名，不必对应 OpenSpec change。自动循环仍使用 canonical change id 作为目录名，供看板定位。日常交接直接读文件，无需看板索引。
+
+需求、Spec/AC 冲突处理与项目角色权限统一遵循 `CLAUDE.md` 的“需求、验收与项目角色”。普通小修无需额外角色；采用多角色流程时，由项目已有权威文档声明权限。工具就绪或归档不代替约定的 QA 和 Done 确认。
 
 ## 可选：自动循环
 
@@ -32,7 +34,7 @@ Unix 入口为 `.harness/scripts/harness`，Windows 为 `.harness/scripts/harnes
 
 ### 旧 current 迁移
 
-本模板已移除 `.harness/current.json`，运行时不读取、不覆盖它；reset-current、sync-candidates 和看板状态写入入口已移除。旧调用方应改用只读 status 和 `next <change>`。
+本模板已移除旧 current 状态文件（原 `.harness/` 下的 `current.json`），运行时不读取、不覆盖它；reset-current、sync-candidates 和看板状态写入入口已移除。旧调用方应改用只读 status 和 `next <change>`。
 
 已采用项目升级前检查旧文件：把每个 change 的 `generated_by`、`depends_on`、仍有效的明确 blocker 移入对应 `program.md` 元数据块；只把无法重建的决定和下一步放进交接。不要迁移候选集合、任务进度、文件清单或 active。尚未表达在验证步骤中的人工约束必须保留为 blocker。对无法关联到 change 的内容先人工核对，不能直接丢弃。
 
@@ -46,6 +48,6 @@ Unix 入口为 `.harness/scripts/harness`，Windows 为 `.harness/scripts/harnes
 
 ## 升级与后台任务
 
-更新器保留项目自己的 agent 规则、状态和事实文件；升级后需手动合并新版 `CLAUDE.md` / `AGENTS.md`。按上面的迁移说明转移旧状态中的有效信息，保留 change、验证与历史记录。
+更新器按 manifest 同步脚本、看板、模板和本指南，保留项目自己的 agent 规则、状态和事实文件。升级后手动合并新版 `CLAUDE.md` 的需求验收与项目角色规则、`.harness/program.md` 的循环适用范围和验收边界，`AGENTS.md` 继续引用根规则；保留项目已有角色政策，不因模板更新重置权限。按上面的迁移说明转移旧状态中的有效信息，保留 change、验证与历史记录。
 
 后台 Prompt 位于 `docs/agents/`。未启用 OpenSpec 本身不是日常任务的故障。只读扫描保持只读，扫描发现不自动扩大实现授权；涉及已有 change 的修复遵守原流程。

@@ -1,11 +1,30 @@
 # lite-harness 轻量化修改意见（RFC）
 
-**状态**：提案（未实施）  
+**状态**：已增量采纳；原评审意见保留，未采纳项不作为执行要求
+
 **日期**：2026-09-15  
 **受众**：lite-harness 维护者与后续实现 agent  
 **来源**：CoTrain 多角色评审共识（Unity Tech Lead / Producer / Engineering 连续性 / QA / Systems Design）
 
-本文档描述如何把 lite-harness 从「全量仪式 + 机器门禁」收敛为「**目录级 SSOT + 证据门槛 + ADR + 人工角色门禁**」，脚本与 OpenSpec CLI 降为**可选插件**。不替代 OpenSpec 上游设计，也不写入 CoTrain 专属玩法规则。
+本文保留 CoTrain 多角色评审意见，并记录与本地已实现行为的对照及增量采纳结果。不替代 OpenSpec 上游设计，也不写入 CoTrain 专属玩法规则。
+
+> **阅读顺序与效力**：先读 §0 的采纳结论，再读 §7、§10 的现行执行说明。§1–§6、§8–§9 保留原评审内容（包括角色逐字条款），属于基于旧版本的历史意见；其中“必须”“默认”“当前”等表述不直接修改仓库规则。现行工作规则以根目录 [CLAUDE.md](../../CLAUDE.md) 为准。尤其不得按旧建议恢复 current/单槽、新增 profile 或放松自动循环门槛。
+
+## 0. 本地实现对照与采纳结论
+
+基线核对：远端 PR #5（`1a222bb`）新增本 RFC 及角色补充，本地 `bc1c510` 已合并它，并领先 5 个提交（含合并提交）。本地实现已先于 RFC 完成部分轻量化目标；不能把旧基线草图当成当前运行方式。
+
+| 评审建议 | 当前实现与本次结论 |
+| --- | --- |
+| 默认轻量协作、工具按需使用 | `e854890` 已实现；保留日常协作默认，见[默认日常协作 ADR](../adr/20260909-default-lightweight-collaboration.md)。 |
+| 移除重复状态与单 active 槽 | `f769597` 已删除 current 和状态写入入口，见[直接查询 OpenSpec ADR](../adr/20260909-query-openspec-without-current.md)。不恢复可选文件、单槽或旧输入兼容层；旧文件只用于人工迁移。 |
+| Spec/AC、证据与设计门禁 | 本次补齐需求权威与评估判据的边界；影响实现的未决问题先澄清，缺必需证据不得声称验收通过。 |
+| Producer / QA / Design 权限 | 由采用项目在已有权威文档声明并链接；采用该多角色流程后执行其门禁。普通日常任务不强制配齐角色。 |
+| 全局 lite/strict 配置、可选提交隔离 | 本轮不采纳；按任务选择工作方式，自动循环继续使用不同 agent/model 及现有提交隔离。 |
+| 默认手动归档、七项改为辅助报告 | 本轮不采纳；日常任务无需归档，已有自动循环保留七项门槛、人工步骤、blocker 和回滚点。就绪/归档不代替项目约定的 QA 与 Done 确认。 |
+| 看板及脚本可选、证据 SSOT | 保持现状并统一说明；选用自动循环后仍完整执行契约，不新建状态权威。 |
+
+本次增量决定见[增量采纳 ADR](../adr/20260915-incremental-slim-rfc-adoption.md)。公共 CLI、API、JSON schema 和运行时行为不变。
 
 ---
 
@@ -173,29 +192,16 @@ flowchart LR
 
 ---
 
-## 7. 建议实施阶段（供后续 agent）
+## 7. 增量实施记录（替代原 Phase 0–2 执行指引）
 
-### Phase 0 — 仅文档（本 PR 所属阶段）
+原 Phase 0–2 的全局 profile、单槽兼容层和默认手动归档路径不再作为实施顺序。当前交付范围为：
 
-- 发布本 RFC；更新 README / `index.md` 指向 `docs/proposals/`。  
-- 在 `CLAUDE.md` / `AGENTS.md` 增加「轻量默认 vs 严格模式」对照表（引用本 RFC，不重复全文）。  
-- 标明：当前代码行为仍以 main 为准，直至 Phase 1。
+1. 校准 RFC 的历史基线和采纳状态，保留角色原文；同步提案索引及入口文案。
+2. 在 `CLAUDE.md` 明确 Spec/AC、未决问题、证据和项目声明的角色权限；循环说明及 program 模板引用这些规则，评估判据不得覆盖需求。
+3. 统一 README、使用指南、看板及升级说明；采用项目手动合并项目自有规则，保留现有角色政策、验证和归档契约。
+4. 用 ADR 记录取舍；校验文档引用和差异格式，并核对普通小修、多角色项目、已有自动循环三个场景。
 
-### Phase 1 — 可选插件与默认开关
-
-- 引入项目级配置（名称待定），默认 `profile: lite`。  
-- `lite`：不推荐每轮 `status`；`harness *` 命令仍可用；文档生成「close 前 checklist」替代 autoclose 提示。  
-- `strict`：保留今日七项、`autoclose`、提交隔离校验、单 `active_change` 漂移检测。  
-- Dashboard 标记为 optional；README 前置依赖表区分「核心」与「插件」。
-
-### Phase 2 — 退役强制 autoclose 为默认
-
-- 将 `autoclose` 从 agent 循环文档的默认收尾移除；改为 maintainer/CI 显式调用。  
-- `harness ready` 保留为报告命令，不触发副作用。  
-- 评估是否将 `current.json` 单槽改为「建议字段」；提供迁移说明与 `harness_state` 兼容层。  
-- 更新 `update-manifest` 与 `docs/agents/prompts/*`，去掉「每轮必跑」措辞。
-
-**每个 Phase 结束条件**：`openspec validate`（若项目使用 OpenSpec）通过；示例 adopters 文档更新；无未记录的破坏性默认变更。
+本次是文档与模板说明更新，不创建空 OpenSpec change，不引入配置或运行时改造。放松门槛或改变归档行为需要另行设计。
 
 ---
 
@@ -221,13 +227,13 @@ flowchart LR
 
 ---
 
-## 10. 后续实现 agent 起手 checklist
+## 10. 后续 agent 阅读入口
 
-1. 阅读本 RFC 与当前 `README.md`、`CLAUDE.md` 差异列表。  
-2. 与用户确认默认 profile：`lite` 还是维持 `strict` 直至 Phase 2。  
-3. Phase 0 文档 PR 合并后，再开 change 做配置与默认开关（Phase 1）。  
-4. 任何默认行为变更须在 `docs/proposals/` 或 ADR 中留痕，并更新 `update-harness` 说明。
+1. 从根目录 `CLAUDE.md` 恢复现行规则，核对 Git 状态与相关 ADR；不要把本 RFC 的历史“当前循环”当成实现事实。
+2. 查看 §0 的采纳结论；默认日常协作和移除 current 已完成，不重复实现。
+3. 普通任务遵循日常协作；接续已有 change 时保留自动循环的独立评估、人工步骤与全部门槛。
+4. 升级采用项目时按 `index.md` 手动合并自有规则；新增全局配置或改变归档机制不属于本次授权范围。
 
 ---
 
-*本文档为修改意见，不代表 main 分支运行时已启用轻量默认。*
+*本文同时保留历史修改意见与采纳记录；未采纳建议不代表当前默认行为。*

@@ -23,6 +23,8 @@
 
 复杂变更先明确设计与验收，可选择 OpenSpec。接续已有 change 或运行自动循环时继续遵守原有质量契约和角色边界，不能绕过人工检查。任务与进度直接从 OpenSpec 查询，不再保存独立的 current 状态文件。
 
+需求、验收与项目角色权限以 [CLAUDE.md](CLAUDE.md) 为准。工具可选；选用自动循环后须完整执行既有契约。工具就绪或归档不代替项目约定的 QA 验收与 Done 确认。
+
 ## 自动循环的信息来源（可选）
 
 本工作流遵循单一权威来源原则：一种信息只对应一个权威来源，其余文件仅作引用，不得重复维护副本。
@@ -108,11 +110,11 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 
 更新器默认从 `https://github.com/Qingswe/lite-harness.git` 的 `main` 分支读取 `.harness/update-manifest.txt`，只同步 harness 管理的脚本、看板、模板和流程说明文件。它不会默认覆盖项目事实或执行状态文件，例如 `AGENTS.md`、`CLAUDE.md`、`ARCHITECTURE.md`、`README.md`、`.harness/current.json`、`.harness/feature-index.json`、`openspec/` 与长期质量记录。
 
-升级已有项目时，需手动合并 `CLAUDE.md` / `AGENTS.md` 及 `.harness/program.md` 的适用范围 的日常协作规则；更新器不覆盖这些项目自有规则。旧 current 中有效的身份、依赖和阻塞按 index.md 迁入 change 后移除，保留已有验收要求。
+升级已有项目时，需手动合并 `CLAUDE.md` 中的日常协作、需求验收与项目角色规则，以及 `.harness/program.md` 的适用范围和验收边界；`AGENTS.md` 保持引用根规则。更新器不覆盖这些项目自有规则，也不替项目声明角色权限。脚本、看板与模板说明按 manifest 同步，项目原有 Spec/AC、角色政策和验收要求继续保留。旧 current 中有效的身份、依赖和阻塞按 index.md 迁入 change 后移除。
 
 实际同步时会先把被覆盖的文件备份到 `.harness/backups/harness-update-<timestamp>/`。可通过 `--ref <tag-or-branch>` / `-Ref <tag-or-branch>` 固定更新来源。
 
-## 看板（Dashboard）
+## 看板（Dashboard，可选）
 
 本地网页工具，用于集中查看与勾选各 change 的任务项及人工检查项，并只读预览 checkpoint、验证记录、证据与质量文档：
 
@@ -171,7 +173,7 @@ Windows 环境可使用 `.harness/scripts/harness.ps1`。
 
 ## 演进提案
 
-轻量化方向（SSOT + 证据与人工门禁为主，脚本/OpenSpec 仪式降为可选插件）见 [docs/proposals/2026-09-15-lite-harness-slim-down.md](docs/proposals/2026-09-15-lite-harness-slim-down.md)。
+轻量化评审原文、已完成项与增量采纳结论见 [docs/proposals/2026-09-15-lite-harness-slim-down.md](docs/proposals/2026-09-15-lite-harness-slim-down.md)。
 
 ## 参考与致谢
 

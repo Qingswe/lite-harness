@@ -13,6 +13,8 @@
 
 本文件只约束采用自动循环的任务。日常协作按根目录 `CLAUDE.md` 执行，不要求创建 change 或派独立 Evaluator。接续已有 change 时仍须遵守本文件，不能借工作方式切换绕过既定门槛。这里的“每轮”均指自动循环的一轮。
 
+需求与验收权威、项目角色权限遵循根目录 [CLAUDE.md](../CLAUDE.md) 的“需求、验收与项目角色”。本文件定义循环执行契约；change 的评估规则落实 Spec/AC，不能改写需求，冲突时先停止并澄清。项目声明的 QA / Producer 权限不替代以下 Generator / Evaluator 隔离要求。
+
 ## 1. 两条判据
 
 > **一件事应该由人做，当且仅当 AI 无法为它产出可复查的证据。**
@@ -92,6 +94,8 @@ harness next <change> --json      → 目标 change、目标 task、该派的角
   就绪度实现有缺陷时，门槛是最后一道。
 - **归档前建立回滚点。** 打 `harness/pre-close/<change>` tag，回滚是一条命令。
   成功推进 main，失败可退回——ratchet 模式。
+
+归档表示循环门槛已满足，不代替项目约定的产品验收或 Done 确认。必需的人工验收须落实为 `role: human` 步骤，尚未落实的人工约束先记入 change 的 blocker；具体权限遵循根目录 `CLAUDE.md` 引用的项目规则。
 
 ### 4.3 何时该由人介入
 

@@ -18,6 +18,18 @@
 - 日常验证：优先引用测试输出、CI、提交或 PR，需持久保留的本地日志放 `.harness/evidence/`。不重复抄录已有证据。
 - 任务和进度从 `openspec/changes/<id>/tasks.md`、`verification.json` 实时查询，不维护全局状态文件。实现者身份、依赖和明确阻塞放在该 change 的 `program.md` 可选元数据块；格式见模板。CLI 与看板共用解析器。
 
+## 需求、验收与项目角色
+
+实现前明确本次行为的权威需求（Spec）路径和验收标准（AC）；采用 OpenSpec 时结合现行规格与本次已批准的变更设计。影响本次实现的 Decision Required、Open Questions 或未定义规则必须先澄清，不能猜规则、擅自标 Approved，或为使实现通过而改需求、降低 AC。
+
+change 的 `program.md` 评估规则负责把 Spec/AC 落实为可执行判据，不能覆盖需求。发现冲突时停止受影响的实现与验收，交由项目指定的需求负责人澄清，并按项目变更流程同步规则后继续。
+
+工程师 smoke、静态检查和环境探针只证明各自覆盖的范围，不能代替约定的 QA 或实机验收。缺少必需证据或尚未执行必需的实机检查时，报告阻塞及缺项，不声称验收通过。
+
+采用多角色流程的项目，应在已有权威文档中声明 Spec/AC 路径、设计批准权限、QA 判定权限和 Done 修改权限，并从 `ARCHITECTURE.md` 链接。采用 Producer / QA / Design 分工时，Design 关闭未决问题并批准 Spec 后才能拆实现任务；QA 按 Spec/AC 给出 PASS / FAIL / BLOCKED，不通过修改实现或降低 AC 自行判过；Producer 仅在 QA PASS 后正式标 Done，实现方不能代改。普通日常任务不因此强制配齐角色或新增状态文件。
+
+工具就绪或归档不替代项目约定的产品验收和 Done 确认。自动循环中必需的人工验收必须落实到现有 `role: human` 验证步骤；尚未落实的人工约束先记录为 change 的 blocker，不能让归档绕过它。
+
 ## 日常协作
 
 1. 运行 `pwd`、`git status --short` 和 `git log --oneline -5`，确认目录、已有修改与近期工作。保护用户的未提交修改。
@@ -38,7 +50,7 @@
 4. Generator 写实现和 tasks；Evaluator 按 `.harness/program.md` 运行真实验证，用 `harness check` 记录结论和证据，不改实现。未完成的人工步骤继续阻塞，无需占用或释放执行槽。
 5. 质量文档仍按循环契约预筛；按需写交接。`harness ready` / `lint` 计算和校验完整门槛，就绪后由 `autoclose` / `close` 建立回滚点并归档，不直接调用 `openspec archive`。归档后查询自然不再列出该 change，无需同步或清理状态副本。
 
-能力索引继续由 `sync-feature-index.py` 派生，人工仅维护 overrides。旧状态文件的迁移见 `index.md`，不再创建或维护 `.harness/current.json`。
+能力索引继续由 `sync-feature-index.py` 派生，人工仅维护 overrides。旧状态文件的迁移见 `index.md`，不再创建或维护旧 current 状态文件（原 `.harness/` 下的 `current.json`）。
 
 ## 两种方式共同遵守
 
